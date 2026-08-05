@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ScenePaper</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <h1>ScenePaper</h1>
+      <p class="tagline">Topic in. Source-verified, recording-ready scene paper out.</p>
+    </div>
+    <div id="usage-widget" class="usage-widget" aria-live="polite">
+      <!-- filled by app.js: renderUsageWidget() -->
+    </div>
+  </header>
+
+  <main>
+    <!-- ============ VIEW 1: Topic input + candidate picker ============ -->
+    <section id="view-topic" class="view">
+      <form id="topic-form" class="topic-form">
+        <label for="topic-input">What's the topic?</label>
+        <div class="topic-row">
+          <input
+            id="topic-input"
+            type="text"
+            placeholder="e.g. the first person to swim the English Channel"
+            autocomplete="off"
+            required
+          />
+          <button type="submit" id="topic-submit">Find stories</button>
+        </div>
+      </form>
+
+      <div id="topic-status" class="status-line" role="status"></div>
+
+      <div id="candidate-list" class="candidate-list"></div>
+    </section>
+
+    <!-- ============ VIEW 2: Scene paper detail ============ -->
+    <section id="view-paper" class="view hidden">
+      <button id="back-to-candidates" class="link-button">&larr; Back to candidates</button>
+      <div id="paper-status" class="status-line" role="status"></div>
+      <div id="paper-detail"></div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>
+      <strong>Mock data notice:</strong> every result on this screen comes from
+      <code>src/web/js/mockApi.js</code> (<code>USE_MOCK_DATA = true</code>), shaped to match the
+      real <code>ScenePaper</code> schema in <code>CLAUDE.md</code>. Swap it for real calls to the
+      Catalyst Advanced I/O Function by flipping that flag — see the comment block at the top of
+      that file.
+    </p>
+  </footer>
+
+  <script src="js/mockApi.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
