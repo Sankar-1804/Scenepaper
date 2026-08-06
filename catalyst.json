@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "targets": [
+      "scenepaper_pipeline",
+      "scenepaper_pipeline_job"
+    ],
+    "ignore": [],
+    "source": "functions"
+  },
+  "apig": {
+    "enabled": true
+  }
+}

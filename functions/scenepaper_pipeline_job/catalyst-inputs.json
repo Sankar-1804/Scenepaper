@@ -1,0 +1,10 @@
+{
+  "test_job": {
+    "params": {
+      "paper_id": "fixture-paper-1",
+      "topic": "a comeback story in tech",
+      "candidate": "{\"one_liner\": \"[stub] Candidate A for 'a comeback story in tech'\"}",
+      "user_id": ""
+    }
+  }
+}
