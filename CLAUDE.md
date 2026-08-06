@@ -90,14 +90,29 @@ ScenePaper
   peak_tension_window       # "18-30s"
   payoff_window             # "48-55s"
   hooks[]                   # [{label, type, text, best_for_note}]
+                            # `text` is `[{text, verified}]` -- an array of spans, not a plain
+                            # string (see below).
   scenes[]                  # [{scene_number, scene_name, pacing_tag, time_range, script[]}]
                             # script[] = [{speaker, line, direction}] -- a real script, not a
                             # one-line summary. `speaker` is "SPEAKER" for single-voice scenes;
                             # when a scene genuinely needs more than one, suffix with numbers
-                            # ("SPEAKER_1", "SPEAKER_2", ...). `line` is the exact spoken text.
-                            # `direction` is inline tone/pacing/pause guidance for that specific
-                            # line (e.g. "drop pace here, [pause 0.6s] before the reveal") --
-                            # written so it could be fed close to directly into Voicebox.
+                            # ("SPEAKER_1", "SPEAKER_2", ...). `direction` is inline tone/pacing/
+                            # pause guidance for that specific line (e.g. "drop pace here,
+                            # [pause 0.6s] before the reveal") -- written so it could be fed close
+                            # to directly into Voicebox.
+                            # `line` is `[{text, verified}]` -- an array of spans, NOT a plain
+                            # string (decided when ui-agent asked how rule 5's verified-fact-vs-
+                            # narrative-framing distinction should actually be represented in the
+                            # data). Concatenate `text` fields in order to reconstruct the full
+                            # line; each span's `verified` bool says whether that specific clause
+                            # is sourced fact or unverifiable narrative color. Chosen over a
+                            # coarse per-line/per-hook bool because a single line frequently mixes
+                            # both (e.g. a documented fact followed by a dramatized flourish in
+                            # the same sentence) -- a per-line bool can't represent that without
+                            # either burying the verified part under a warning or hiding the
+                            # framing part entirely, which defeats the point of the rule. Same
+                            # span shape applies to `hooks[].text` above, so the UI has one
+                            # rendering pattern for both instead of two.
   delivery_notes[]          # [{label, note}] -- CTA-level notes ONLY now. Per-scene/per-line
                             # delivery guidance moved into scenes[].script[].direction (session-2
                             # addendum, decided after reviewing the mock UI's one-liner scenes and
