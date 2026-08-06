@@ -156,6 +156,14 @@ def run_pipeline_route_tests():
     resp = pipeline_main.handler(FakeRequest("POST", "/ideate", {}))
     check("POST /ideate (missing topic) returns 400", response_status(resp) == 400)
 
+    # Job pool + job function now exist for real (created this session --
+    # see the docstring on _submit_pipeline_job). Locally this still can't
+    # succeed end-to-end -- there's no real Catalyst invocation context
+    # (headers/auth) outside the actual deployed runtime -- so the real SDK
+    # call fails and the route correctly falls through to the 502
+    # "downstream failure" path, not the old 503 "not configured" path.
+    # On the real deployed function this same code should actually submit
+    # the job successfully.
     resp = pipeline_main.handler(
         FakeRequest(
             "POST",
@@ -164,8 +172,8 @@ def run_pipeline_route_tests():
         )
     )
     check(
-        "POST /generate (job pool not configured yet) returns 503",
-        response_status(resp) == 503,
+        "POST /generate (job submission attempted, fails outside real Catalyst runtime) returns 502",
+        response_status(resp) == 502,
         response_json(resp),
     )
 

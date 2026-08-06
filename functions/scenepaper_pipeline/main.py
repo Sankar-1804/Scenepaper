@@ -193,27 +193,21 @@ def _submit_pipeline_job(job_params: dict) -> dict:
     Advanced I/O function's 30s budget is nowhere near enough.
 
     Requires a Job Pool (target_type=Function, pointing at the deployed
-    scenepaper_pipeline_job Job function) to already exist in this Catalyst
-    project. As of this session (see PR / issue #8 comment):
-      - No job pool exists yet in this project.
-      - scenepaper_pipeline_job is not deployed yet, so it has no function
-        id to target.
-    Both of those are provisioning/deployment steps -- HIL per
-    docs/task-breakdown.md ("secrets/deployment" is always HIL) -- not
-    something this session invents IDs for. Once the human creates the job
-    pool and deploys the job function, set these env vars on
-    scenepaper_pipeline (Catalyst console -> function -> Environment
-    Variables, or catalyst-config.json's env_variables):
-      SCENEPAPER_JOBPOOL_ID        (required)
-      SCENEPAPER_JOBPOOL_NAME      (optional, defaults below)
-      SCENEPAPER_JOB_FUNCTION_ID   (required)
-      SCENEPAPER_JOB_FUNCTION_NAME (optional, defaults below)
-    Until then this raises RuntimeError, which the /generate handler turns
-    into a 503 so the routing skeleton is still fully exercisable locally.
+    scenepaper_pipeline_job Job function) to exist in this Catalyst project.
+
+    Job pool "scenepaper_job_pool" (id 59024000000020001) and the deployed
+    scenepaper_pipeline_job function (id 59024000000021001) were created
+    this session via the Catalyst MCP + CLI. Hardcoded as the default below
+    rather than read purely from env vars: Catalyst Functions turned out to
+    have no platform-level environment-variable support at all (confirmed
+    via both the CLI's `functions:config` -- only --memory is configurable
+    -- and the MCP's env-var tools, which are scoped to AppSail deployment
+    resources, not Functions). Overridable via env var if that ever
+    changes, or for local/test overrides.
     """
-    jobpool_id = os.environ.get("SCENEPAPER_JOBPOOL_ID")
+    jobpool_id = os.environ.get("SCENEPAPER_JOBPOOL_ID", "59024000000020001")
     jobpool_name = os.environ.get("SCENEPAPER_JOBPOOL_NAME", "scenepaper_job_pool")
-    job_function_id = os.environ.get("SCENEPAPER_JOB_FUNCTION_ID")
+    job_function_id = os.environ.get("SCENEPAPER_JOB_FUNCTION_ID", "59024000000021001")
     job_function_name = os.environ.get(
         "SCENEPAPER_JOB_FUNCTION_NAME", "scenepaper_pipeline_job"
     )
