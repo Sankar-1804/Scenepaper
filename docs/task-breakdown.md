@@ -16,10 +16,10 @@ When in doubt, it's HIL.
 
 ## Phase 1 — Backend Foundation `[catalyst-agent]`
 
-### Tasklist 1.1 — DataStore & Function setup — AFK
-- [ ] DataStore schema for `ScenePaper` + `UserProfile` (per CLAUDE.md schema)
-  - [ ] Define columns, types, JSON fields
-  - [ ] Write migration/setup script
+### Tasklist 1.1 — NoSQL & Function setup — AFK
+- [ ] NoSQL table design for `ScenePaper` + `UserProfile` (per CLAUDE.md schema) — native JSON documents, no serialization needed
+  - [ ] Define secondary indexes (at minimum: `category` for `list_available_stories`)
+  - [ ] Write table/index setup script
 - [ ] Advanced I/O Function routing skeleton
   - [ ] POST /ideate
   - [ ] POST /generate
@@ -30,14 +30,26 @@ When in doubt, it's HIL.
 
 ## Phase 2 — Content Pipeline `[api-integration-agent]`
 
-### Tasklist 2.1 — Ideation search — Mixed
-- [ ] Wikipedia search wrapper — **afk**
-- [ ] Source verification logic (citable URL check) — **afk**
+### Tasklist 2.1 — Ideation search (SearXNG) — Mixed
+- [ ] SearXNG hosting resolved (self-hosted — docker unavailable as of session 2, needs an alternative) — **hil**, blocks everything below
+- [ ] Query classification: broad vs. specific request — **afk**
+- [ ] Query-generation call: structured JSON output, controlled `angle_type` vocabulary — **hil** (tune for genuinely different angles, not near-synonyms)
+- [ ] Broad-request fan-out: 3-4 parallel SearXNG queries across niche sub-angles — **afk**
+- [ ] Specific-request discovery step: cluster by event, Axis 1 (different events) vs. Axis 2 (different framings) per the >=3-events rule — **afk**
+- [ ] Result clustering + domain-quality scoring (SearXNG results are noisy — filter before clustering) — **afk**
+- [ ] Fetch top 1-2 results per cluster for one-liner generation (snippets alone are too thin) — **afk**
+- [ ] "Show me more" loop: exclusion context (`already_surfaced[...]`), hint handling, exhaustion detection — **afk**
 - [ ] Ideation prompt tuning (quality of 3–4 one-liners) — **hil**
 
-### Tasklist 2.2 — Structuring call — Mixed
-- [ ] Structuring prompt matching the rich schema — **hil** (highest-leverage
+### Tasklist 2.2 — Verification & structuring — Mixed
+- [ ] **Call A (verification/scoring)** — never sees profile.md, sources + platform rules only — **hil** (security-critical, get the isolation right first)
+- [ ] Scoring output: `x/10` + tag + binary flags (`sources conflict`, `single source only`, `unverified origin`, `claim not found in primary sources`) — **afk**
+- [ ] Suppression logic: fabrications/satire/AI-farms only, always shown with reason — **afk**
+- [ ] profile.md parsing: whitelist fields only, unrecognized sections dropped with a visible warning — **afk**
+- [ ] profile.md sanitization: length caps, values framed as data not instructions, log rejections/truncations — **hil**
+- [ ] **Call B (structuring)** — receives Call A's score as a fixed input, no authority to change it, applies profile.md format prefs — **hil** (highest-leverage
       creative task — do the first pass yourself, don't delegate blind)
+  - [ ] **Output a real per-scene script, not a one-liner summary** (session-2 addendum, decided after reviewing the mock UI's thin scene descriptions): each `scenes[]` entry needs a `scene_name` and a `script[]` array of `{speaker, line, direction}` — `speaker` is `"SPEAKER"` for single-voice scenes, `"SPEAKER_1"`/`"SPEAKER_2"`/etc. when a scene genuinely needs more than one, `line` is the exact spoken text, `direction` is inline tone/pacing/pause guidance per line. `delivery_notes[]` is now CTA-only.
 - [ ] JSON schema validation + retry-on-invalid — **afk**
 - [ ] Category classification (enum-constrained) — **afk**
 
@@ -75,6 +87,19 @@ Depends on Phases 1–4 landing first — each tool call wraps an already-built 
 - [ ] `list_available_stories` — **afk**
 - [ ] `get_usage_status` — **afk**
 - [ ] End-to-end validation of every tool call — **hil**
+
+## Phase 5.5 — Mobile Core `[mobile-core-agent]` — Tier 2, Day 3 only
+Gated behind Tier 1 being fully working and demo-safe (same rule as the rest of
+Tier 2) — do not start this while Tier 1 is still shaky. Web client is unaffected:
+it renders the direct JSON response from the Python API via JS, no Rust involved.
+- [ ] Rust core crate: shared request/response models + client logic for the
+      ScenePaper API — **afk**
+- [ ] UniFFI (or equivalent) bindings generated for Swift — **afk**
+- [ ] UniFFI (or equivalent) bindings generated for Kotlin — **afk**
+- [ ] iOS app wired to the Rust core — **hil** (first real integration test of
+      the bindings)
+- [ ] Android app wired to the Rust core — **hil**, and only attempted if there's
+      real slack — Android remains the first thing to drop if time is short
 
 ## Phase 6 — Integration & Demo Readiness
 Entirely HIL, no exceptions — this is where silent breakage between agents' work

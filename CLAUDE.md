@@ -43,7 +43,7 @@ The actual differentiator — protect this: the moat is the curated, verified st
 
 Hackathon constraints (hard rules — do not violate)
 4 days total. Checklist-graded against 8 required outputs — not just app quality.
-Backend: Zoho Catalyst preferred (DataStore, Advanced I/O Functions, File Store, Auth). If any Catalyst service is skipped, document why in docs/catalyst-notes.md.
+Backend: Zoho Catalyst preferred (NoSQL, Advanced I/O Functions, File Store, Auth). If any Catalyst service is skipped, document why in docs/catalyst-notes.md.
 Language: Python (Catalyst supports Python up to 3.9 for Advanced I/O Functions — verify any library against this before adding it).
 Scope: ONE primary entity (ScenePaper), full CRUD, demoable live. No secondary entities until this is airtight.
 Repo layout is fixed and non-negotiable: README.md, ai-docs/, docs/, agents/, src/
@@ -57,10 +57,26 @@ Day 3 rule: I drive every change myself with agent/Sahaa/Claude as tools. Checkp
 Two 10-minute talks are real deliverables: Day 2 pitch, Day 4 retro. Draft scripts early, don't write them cold.
 Product flow (the real shape, not just CRUD)
 User has a lightweight UserProfile (about_me / niche description) that informs ideation — not full multi-user auth for the hackathon, effectively single-user.
-User submits a topic. The ideation step searches for verified candidate stories (Wikipedia / a structured news API — same verification bar as the main pipeline, do not loosen this at the ideation stage) and returns 3–4 one-liner options. Candidates are ephemeral — do not persist them as their own CRUD entity, this stays within the "one primary entity" rule. ScenePaper remains the only DataStore table.
-User picks one candidate. Only then does the full structuring pipeline run and a ScenePaper row gets created.
+User submits a topic. The ideation step searches for verified candidate stories via **SearXNG** (self-hosted metasearch — decided in the session-2 addendum, supersedes the earlier Wikipedia/news-API framing) and returns 3–4 one-liner options, always the top 3 regardless of score (see Search, verification & trust model below). Candidates are ephemeral — do not persist them as their own CRUD entity, this stays within the "one primary entity" rule. ScenePaper remains the only NoSQL table.
+User picks one candidate. Only then does the full structuring pipeline run (two separate LLM calls — verification, then structuring, see below) and a ScenePaper row gets created.
 Free/paid gate: first 10 ScenePaper generations (text) are free, total, then each further paper is paid. Audio/video export is a separate gate, always paid, even for papers generated within the free 10.
 Hackathon demo: no real payment gateway. Mock both gates — real counters, real "Unlock" UI states, no actual charge, no Razorpay/Stripe integration. Label mocked actions honestly in the UI rather than faking a real checkout flow.
+
+Search, verification & trust model (session-2 addendum — full detail in ai-docs/, this is the working summary)
+
+Search pipeline: user request → classify (broad vs. specific) → build query set → SearXNG → filter/rank → cluster into distinct candidates → summarize into one-liners. SearXNG is noisy (news/blogs/Reddit/SEO farms mixed together) — domain-quality scoring happens before clustering, and snippets alone are too thin to judge a story, so expect to fetch the top 1-2 results per cluster. SearXNG is self-hosted — hosting location is still an open decision (docker unavailable in this environment as of session 2; needs a resolution before Phase 2 is buildable — see docs/catalyst-notes.md).
+Broad requests (e.g. "motivational story") fan out into 3-4 parallel SearXNG queries across sub-angles of the creator's niche, prompted for structurally different angles (era/industry/failure-vs-success), not near-synonyms.
+Specific requests (e.g. "Snapchat") run a discovery step first: cluster by event, and prefer different-events-in-the-subject's-history (Axis 1) when >=3 documented events exist, falling back to different-framings-of-one-event (Axis 2) when they don't. Watch for subject ambiguity (resolve via profile/domain or ask) and over-told subjects (deliberately reach for a less-covered angle).
+"Show me more": fresh search every round, no pre-fetch caching — cost scales with actual demand. Query generation runs against a growing exclusion context (already_surfaced[...]) with a controlled `angle_type` vocabulary (comeback, rejection, pivot, underdog, sacrifice, lucky-break, etc.) so round 2 mechanically avoids round 1's angle types rather than hoping the model varies on its own. Detect exhaustion (heavy overlap or dropping quality) and say so honestly rather than serving progressively worse candidates.
+
+Verification scoring: always show top 3 regardless of score — suppressing low scorers silently narrows the library to well-SEO'd mainstream stories, the opposite of the product's value. The only suppression is outright fabrications, satire, and AI-content-farms — and suppressed candidates must still be shown with their suppression reason (also a real demo moment). Score format: `x/10` plus a tag (bands/vocabulary deliberately deferred until real SearXNG output exists). Two separate signals, never conflated: a graded confidence score, and binary flags (`sources conflict`, `single source only`, `unverified origin`, `claim not found in primary sources`) — thinly-sourced is not the same as contradicted, and flags tell the creator exactly what to go check.
+
+Prompt injection defense (non-negotiable architecture, not a nice-to-have): verification/scoring and structuring/formatting are **two separate LLM calls**. Call A (verification) never sees the user's profile config and receives only sources + platform-owned rules. Call B (structuring) sees the profile config for format preferences but has no authority to change the score — it receives Call A's score as a fixed input. This holds even if the profile config contains injected instructions, because the call that could act on them never sees them, and the call that sees them can't act on scores. Defense in depth on top of this: parse the profile config into a whitelisted field set (unrecognized sections dropped with a visible warning), and frame passed-through values as data ("the user's stated tone preference is: <value>"), never as raw instructions.
+
+Multi-sector configurability: a user-editable `profile.md`-style config (separate from the `UserProfile` entity — a file, not a DB row) controls **format only** — scene structure, categories, runtime target, tone, avoid-list — fed into query generation and Call B. **Verification rules (source hierarchy, reliability weights, suppression thresholds) stay platform-owned, never user-configurable** — letting a creator declare their own high-quality sources turns the score into "agreement with user beliefs," which destroys the entire verification moat. Sectors without a dedicated source integration still work, just score lower, honestly reflecting reduced verification depth rather than pretending uniform coverage.
+
+Trust model: do not build toward "blind trust" — one confidently-wrong story does more damage than an honestly-low-scored one, because the creator's audience turns on them, not on the tool. The target is collapsing verification from hours to seconds, not removing it. Trust compounds through calibration (a 9/10 that's reliably solid, a 5/10 that reliably needs work) — bias scoring toward honesty over flattering numbers. The one failure mode source verification cannot catch: every individual claim can verify and the compressed hook can still mislead (narrative color, selective omission). Mitigate with an explicit check in the structuring step — does the hook overstate what sources actually support — and mark unverifiable narrative framing distinctly from sourced fact in the output itself, never in the same confident voice.
+
 Entity schema
 ScenePaper
   id
@@ -74,10 +90,20 @@ ScenePaper
   peak_tension_window       # "18-30s"
   payoff_window             # "48-55s"
   hooks[]                   # [{label, type, text, best_for_note}]
-  scenes[]                  # [{scene_number, title, description, pacing_tag, time_range}]
-  delivery_notes[]          # [{label, note}] -- tied to scene numbers or "CTA"
+  scenes[]                  # [{scene_number, scene_name, pacing_tag, time_range, script[]}]
+                            # script[] = [{speaker, line, direction}] -- a real script, not a
+                            # one-line summary. `speaker` is "SPEAKER" for single-voice scenes;
+                            # when a scene genuinely needs more than one, suffix with numbers
+                            # ("SPEAKER_1", "SPEAKER_2", ...). `line` is the exact spoken text.
+                            # `direction` is inline tone/pacing/pause guidance for that specific
+                            # line (e.g. "drop pace here, [pause 0.6s] before the reveal") --
+                            # written so it could be fed close to directly into Voicebox.
+  delivery_notes[]          # [{label, note}] -- CTA-level notes ONLY now. Per-scene/per-line
+                            # delivery guidance moved into scenes[].script[].direction (session-2
+                            # addendum, decided after reviewing the mock UI's one-liner scenes and
+                            # finding them too thin -- see docs/task-breakdown.md Phase 2).
   cta_text
-  sources[]                 # [{title, type, date, verified}]
+  sources[]                 # [{title, type, date, verified, confidence_score /10, tag, flags[], suppressed, suppression_reason}]
   voiceover_url
   image_set[]               # [{segment_id, image_url, credit_source}]
   video_url                 # slideshow export, only present once unlocked
@@ -91,14 +117,18 @@ UserProfile                 # lightweight, effectively single-user for the demo
   scenepapers_generated_count
   free_limit                 # = 10, hardcoded constant for hackathon
 
-pacing_tag values: FAST / BUILD / SLOW / WARM — matches the validated mock format. All nested fields (hooks, scenes, delivery_notes, sources, image_set) store as JSON within the single ScenePaper row in Catalyst DataStore — this keeps the design compliant with the hackathon's "one primary entity" rule while still carrying the full product-grade structure.
+profile.md                  # NOT a DB entity — a user-editable file, see Search/verification/trust
+                             # section above. Controls format only (scene structure, categories,
+                             # tone, avoid-list); verification rules stay platform-owned.
+
+pacing_tag values: FAST / BUILD / SLOW / WARM — matches the validated mock format. **DB decision (session 2): Catalyst NoSQL, not the relational Data Store.** All nested fields (hooks, scenes, delivery_notes, sources, image_set) store as **native JSON** within the single ScenePaper document — no manual serialization needed, since NoSQL stores documents as-is. This keeps the design compliant with the hackathon's "one primary entity" rule while still carrying the full product-grade structure. Secondary indexes (Catalyst NoSQL supports up to 20 per table) handle filtering — e.g. an index on `category` for `list_available_stories(category)`. Full relational-vs-NoSQL tradeoff analysis in docs/catalyst-notes.md.
 
 Feature tiers (do not build out of order)
 
 Tier 1 — Core, must work Day 1–2 (this is what gets demoed live):
 
-Topic → 3–4 verified candidate stories (one-liners) → user picks one
-Structuring call: verified source → full rich schema (hooks[], scenes[] with pacing tags, delivery_notes[], sources[], cta_text) — get this exactly right first, it's what makes the demo look finished even before any audio plays
+Topic → 3–4 verified candidate stories (one-liners) via SearXNG → user picks one
+Structuring call, split into two isolated LLM calls per the prompt-injection defense above: Call A (verification/scoring) → Call B (structuring: verified source + Call A's fixed score → full rich schema: hooks[], scenes[] with pacing tags, delivery_notes[], sources[], cta_text) — get this exactly right first, it's what makes the demo look finished even before any audio plays
 Voiceover generation (TTS) — a single consistent voice reading story_body, with pauses inserted at breath points. Per-scene pacing-tag-aware delivery (speeding up on FAST, slowing on SLOW) is a refinement, not a Day-1 requirement — get a working voiceover first, tune its pacing-awareness after, don't let tuning block progress.
 Supporting images: real stock photos (Pexels or Unsplash API) matched per scene keyword — NOT AI-generated images, too unreliable for a live demo on this timeline
 Full CRUD on ScenePaper including its media
@@ -130,20 +160,22 @@ generate_voiceover(paper_id) — regenerate audio independently
 list_available_stories(category) — browse without the UI
 get_usage_status(user_id) — returns free-tier count remaining + export lock state
 Catalyst service mapping
-DataStore — the ScenePaper table
-Advanced I/O Function (Python) — orchestrates: topic in → Wikipedia fetch → verify → LLM structuring call → TTS call → image fetch → write to DataStore → return
+NoSQL — the ScenePaper table (decided over the relational Data Store in session 2 — native JSON document fit, secondary indexes cover the category-filter need; see docs/catalyst-notes.md)
+Advanced I/O Function (Python) — orchestrates: topic in → SearXNG search/cluster → verification call (Call A) → structuring call (Call B) → TTS call → image fetch → write to NoSQL → return
 File Store — serves generated audio/image files; confirm this works cleanly before relying on it mid-demo
 Auth — explicitly out of scope for hackathon unless time allows; note as "not implemented, out of scope" rather than leaving it silently missing
 Agents (in agents/)
 Agent	Role
-catalyst-agent	DataStore schema (ScenePaper + UserProfile) + Advanced I/O Function skeleton
-api-integration-agent	Ideation search, Wikipedia/source verification, structuring call, TTS call, image API, secrets handling
+catalyst-agent	NoSQL schema (ScenePaper + UserProfile) + Advanced I/O Function skeleton
+api-integration-agent	Ideation search (SearXNG), verification scoring (Call A), structuring call (Call B), profile.md parsing, TTS call, image API, secrets handling
 ui-agent	Web client — topic input, candidate picker, paper view, playback, mocked paywall UI
+mcp-agent	Wraps the finished pipeline as MCP tool calls — the hackathon's actual differentiator; depends on Phases 1-4 landing first
 video-agent	Tier 2 only — moviepy slideshow assembly, scene-timed crossfades
+mobile-core-agent	Tier 2 only, gated behind Tier 1 being demo-safe — shared Rust core (FFI bindings via UniFFI or similar) reused by the iOS and Android clients; web stays on direct JSON + JS, no Rust involved there
 feedback-agent	Day 3 only — turns panel feedback into a checkpointed backlog
 docs-agent	Keeps README, ai-docs/, token-log, api-notes, voice-notes in sync every session
 Skills to build (none exist in-org yet — creating these is itself a scored deliverable)
-catalyst-crud-scaffold — reusable DataStore + Function boilerplate pattern
+catalyst-crud-scaffold — reusable NoSQL + Function boilerplate pattern
 token-usage-logger — appends usage estimate to ai-docs/token-log.md per session
 demo-script-builder — drafts/updates Day 2 and Day 4 talk outlines from git log + ai-docs
 Working conventions in this repo
