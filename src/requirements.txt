@@ -1,0 +1,10 @@
+# api-integration-agent runtime dependencies.
+#
+# Catalyst Advanced I/O / Job functions are pinned to Python 3.9 (see
+# docs/catalyst-notes.md) — every dependency here has been checked to
+# install cleanly under 3.9 as of this session. Re-check before bumping any
+# version.
+
+google-genai==1.47.0
+requests==2.32.5
+python-dotenv==1.2.1
