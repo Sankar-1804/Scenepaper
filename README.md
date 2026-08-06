@@ -68,10 +68,11 @@ cd src/backend
 pip install -r requirements.txt --break-system-packages
 # Catalyst CLI deploy / local dev server command goes here
 
-# Web frontend
+# Web frontend (plain HTML/CSS/JS, no build step — any static server works)
 cd src/web
-npm install
-npm run dev
+python3 -m http.server 8000
+# then open http://localhost:8000 — runs entirely against mock data for now,
+# see the USE_MOCK_DATA flag and comment block at the top of src/web/js/mockApi.js
 ```
 
 Environment variables needed (see `.env.example`, never commit the real `.env`):
