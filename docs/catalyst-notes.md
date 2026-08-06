@@ -12,8 +12,13 @@ Went with **Catalyst NoSQL** over the relational **Data Store**. Both were resea
 - **The one real tradeoff, weighed deliberately:** Data Store's ZCQL supports arbitrary multi-condition filtering (`WHERE x AND y AND z`) for free. NoSQL multi-condition filtering requires either a pre-planned composite index (e.g. partition key literally `"category#verification_status"`) or querying one index then filtering the remainder in application code. Since ScenePaper is meant to become a real product beyond the hackathon, this is a genuine future-flexibility cost, not just a today-non-issue — accepted deliberately, not overlooked. If a genuinely unplanned multi-field filter need shows up later (e.g. an open-ended creator-facing filter UI), that's the point to revisit this.
 - Source: [NoSQL Introduction](https://docs.catalyst.zoho.com/en/cloud-scale/help/nosql/introduction/), [NoSQL Indexing](https://docs.catalyst.zoho.com/en/cloud-scale/help/nosql/indexing/introduction), [Data Store Introduction](https://docs.catalyst.zoho.com/en/cloud-scale/help/data-store/introduction/), [Data Store Column Types](https://docs.catalyst.zoho.com/en/cloud-scale/help/data-store/columns)
 
-**Still open (issue #1) — a real tool gap found, not just an unchecked box:**
-The Zoho-provided Catalyst MCP server (connected this session) only exposes the **relational Data Store API** — `Create_Table`/`Create_Column` schemas are pure relational (text/varchar/int/foreign-key with NOT NULL/unique constraints), and scanning all 150+ of its tools, there is no partition key, sort key, or index-creation concept anywhere. **This MCP cannot verify or configure Catalyst NoSQL at all.** The CLI's own command reference doesn't have a `nosql:*` command group either (only `ds:import`/`ds:export` for the relational Data Store). This still needs a direct look at the NoSQL section of the actual console — table/document structure and a secondary index on `category`, same two checks as before, just confirmed now that neither tool covers it.
+**Issue #1 — RESOLVED.** The Zoho-provided Catalyst MCP server and the CLI both turned out to only expose the **relational Data Store API** — no partition key, sort key, or index-creation concept anywhere in either. Confirmed directly in the real console instead:
+- `ScenePaper` table created, partition key `id` (String), no sort key
+- Secondary index `category_index` on `ScenePaper`, partition key `category` (String) — powers `list_available_stories(category)`
+- `UserProfile` table created, partition key `id` (String), no sort key, no index needed
+- Nested fields (`hooks`, `scenes`, `sources`, `image_set`, etc.) aren't pre-declared as columns — written as part of the document body at insert time, exactly as the NoSQL decision assumed
+
+The stubbed `# TODO(issue #1)` DB calls in `functions/scenepaper_pipeline/main.py` can now be replaced with real reads/writes.
 
 ## Issue #2 — RESOLVED: 30 seconds (Basic/Advanced I/O), 15 minutes (Event/Cron/Job)
 
