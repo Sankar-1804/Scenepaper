@@ -3,60 +3,67 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
   <title>ScenePaper</title>
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <header class="app-header">
-    <div class="brand">
-      <h1>ScenePaper</h1>
-      <p class="tagline">Topic in. Source-verified, recording-ready scene paper out.</p>
-    </div>
-    <div id="usage-widget" class="usage-widget" aria-live="polite">
-      <!-- filled by app.js: renderUsageWidget() -->
-    </div>
+  <!--
+    No separate splash overlay. The logo below (#hero-logo) is the ONE
+    element that ever shows the splash SVG — it plays in place, freezes on
+    its final frame, and simply stays there; the rest of the page (marked
+    .pre-reveal) fades in around it once js/splash.js's timer fires. This
+    is deliberate: swapping between a separate splash element and a second
+    "real" logo element risks a visible pop/mismatch at the handoff moment,
+    which is exactly what must never happen here.
+  -->
+  <header class="app-header pre-reveal">
+    <!-- Text placeholder — gets replaced by the logo once designed. -->
+    <span class="brand-name">ScenePaper</span>
+    <button id="settings-button" class="text-button" type="button" title="Settings — not built yet">
+      Settings
+    </button>
   </header>
 
-  <main>
-    <!-- ============ VIEW 1: Topic input + candidate picker ============ -->
-    <section id="view-topic" class="view">
-      <form id="topic-form" class="topic-form">
-        <label for="topic-input">What's the topic?</label>
-        <div class="topic-row">
-          <input
-            id="topic-input"
-            type="text"
-            placeholder="e.g. the first person to swim the English Channel"
-            autocomplete="off"
-            required
-          />
-          <button type="submit" id="topic-submit">Find stories</button>
-        </div>
-      </form>
+  <!-- ============ Screen 1: Topic input ============ -->
+  <main class="screen screen-topic">
+    <div class="hero-block">
+      <div id="hero-logo" class="hero-logo" role="img" aria-label="ScenePaper"></div>
+      <p class="hero-tagline">Researched. Structured. Cited.</p>
+    </div>
 
-      <div id="topic-status" class="status-line" role="status"></div>
+    <div class="example-chips pre-reveal" id="example-chips">
+      <!-- rendered by app.js: renderChips() -->
+    </div>
 
-      <div id="candidate-list" class="candidate-list"></div>
-    </section>
+    <form id="topic-form" class="topic-form pre-reveal">
+      <div class="chat-row">
+        <label for="topic-input" class="sr-only">Topic</label>
+        <textarea
+          id="topic-input"
+          class="topic-textarea"
+          rows="1"
+          placeholder="a founder who almost gave up"
+          aria-label="Topic"
+        ></textarea>
+        <button id="topic-submit" type="submit" class="primary-button">Find stories</button>
+      </div>
+      <p id="topic-error" class="field-error" role="alert" hidden></p>
+      <p id="topic-status" class="status-line" role="status" aria-live="polite"></p>
+    </form>
 
-    <!-- ============ VIEW 2: Scene paper detail ============ -->
-    <section id="view-paper" class="view hidden">
-      <button id="back-to-candidates" class="link-button">&larr; Back to candidates</button>
-      <div id="paper-status" class="status-line" role="status"></div>
-      <div id="paper-detail"></div>
+    <section class="recent-searches pre-reveal" id="recent-searches" aria-live="polite" hidden>
+      <!-- rendered by app.js: renderRecentSearches() -->
     </section>
   </main>
 
-  <footer class="app-footer">
-    <p>
-      <strong>Mock data notice:</strong> every result on this screen comes from
-      <code>src/web/js/mockApi.js</code> (<code>USE_MOCK_DATA = true</code>), shaped to match the
-      real <code>ScenePaper</code> schema in <code>CLAUDE.md</code>. Swap it for real calls to the
-      Catalyst Advanced I/O Function by flipping that flag — see the comment block at the top of
-      that file.
+  <footer class="app-footer pre-reveal">
+    <p class="mock-data-note">
+      Mock data — see <code>src/web/js/mockApi.js</code> (<code>USE_MOCK_DATA = true</code>).
     </p>
   </footer>
 
+  <script src="js/splash.js"></script>
   <script src="js/mockApi.js"></script>
   <script src="js/app.js"></script>
 </body>

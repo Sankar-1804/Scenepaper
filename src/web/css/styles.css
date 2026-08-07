@@ -1,24 +1,25 @@
 /*
  * styles.css
  * ----------
- * Deliberately plain/functional, not polished. Per agents/ui-agent.md, the
- * visual/demo-polish pass is a separate, later, human-in-the-loop task
- * ("does this look finished" is a judgment call) — this stylesheet exists
- * so the AFK scaffold is legible and demoable tonight, nothing more.
+ * Dark mode only — this application has no light theme, per CLAUDE.md.
+ * Flat, hairline borders, generous whitespace, two font weights (400/500),
+ * sentence case everywhere except small tracking-wide section labels.
+ *
+ * Built screen by screen against agents/ui-agent.md's brief. Only Screen 1
+ * (Topic input) is styled so far — later screens add to this file, they
+ * don't get pre-scaffolded ahead of being specced.
  */
 
 :root {
-  --color-bg: #fafafa;
-  --color-text: #1c1c1c;
-  --color-muted: #666;
-  --color-border: #ddd;
-  --color-accent: #2b5fd9;
-  --color-warn-bg: #fff4e5;
-  --color-warn-border: #e0a94a;
-  --color-fast: #d94f4f;
-  --color-build: #d98a2b;
-  --color-slow: #2b6fd9;
-  --color-warm: #3a9b5c;
+  color-scheme: dark;
+  --color-bg: #0b0c0e;
+  --color-surface: #16171a;
+  --color-border: #2a2c30;
+  --color-text: #ececee;
+  --color-muted: #93969c;
+  --color-accent: #6d8bff;
+  --color-accent-text: #f5f6ff;
+  --color-danger: #e2766e;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -31,429 +32,285 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   line-height: 1.5;
+  font-weight: 400;
 }
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- first-load reveal (see js/splash.js) ----
+ * Everything except the logo lockup (#hero-logo) starts invisible via
+ * opacity — NOT display:none/hidden — so its layout space is reserved
+ * from first paint. That's what keeps #hero-logo's position stable: the
+ * flex-centered .screen never reflows when these fade in, because their
+ * boxes were always there.
+ */
+
+.pre-reveal {
+  opacity: 0;
+}
+
+body.app-revealed .pre-reveal {
+  opacity: 1;
+  transition: opacity 0.4s ease;
+}
+
+/* ---- header ---- */
 
 .app-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 1rem;
-  padding: 1.25rem 1.5rem;
+  align-items: center;
+  padding: 1.1rem 1.5rem;
   border-bottom: 1px solid var(--color-border);
-  background: #fff;
 }
 
-.brand h1 {
-  margin: 0;
-  font-size: 1.4rem;
+.brand-name {
+  font-weight: 500;
+  font-size: 1.05rem;
 }
 
-.tagline {
-  margin: 0.25rem 0 0;
+.text-button {
+  background: none;
+  border: none;
   color: var(--color-muted);
-  font-size: 0.9rem;
-}
-
-.usage-widget {
-  min-width: 260px;
   font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0.2rem 0;
 }
 
-.usage-bar {
-  margin-top: 0.35rem;
-  height: 8px;
-  background: #eee;
-  border-radius: 4px;
-  overflow: hidden;
+.text-button:hover {
+  color: var(--color-text);
 }
 
-.usage-bar-fill {
-  height: 100%;
-  background: var(--color-accent);
-}
+/* ---- screen shell ---- */
 
-.simulated-badge {
-  display: inline-block;
-  margin-top: 0.35rem;
-  font-size: 0.72rem;
-  color: #8a5a00;
-  background: var(--color-warn-bg);
-  border: 1px solid var(--color-warn-border);
-  border-radius: 4px;
-  padding: 0.15rem 0.45rem;
-}
-
-main {
-  max-width: 760px;
+.screen {
+  max-width: 640px;
   margin: 0 auto;
-  padding: 1.5rem;
-}
-
-.view.hidden {
-  display: none;
-}
-
-.topic-form label {
-  display: block;
-  font-weight: 600;
-  margin-bottom: 0.4rem;
-}
-
-.topic-row {
+  padding: 2rem 1.5rem;
+  min-height: calc(100vh - 65px); /* 65px ~= .app-header's rendered height */
   display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2rem;
+}
+
+.section-label {
+  display: block;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--color-muted);
+  margin-bottom: 0.6rem;
+}
+
+/* ---- hero block (wordmark + tagline lockup) ---- */
+
+.hero-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 0.5rem;
 }
 
-#topic-input {
-  flex: 1;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 0.95rem;
+.hero-logo {
+  color: var(--color-text);
 }
 
-#topic-submit,
-.pick-button,
-.unlock-button,
-.link-button {
+.hero-logo svg {
+  display: block;
+  max-width: 90vw;
+  height: auto;
+  /* Precise width (matching the wordmark's font-size to the old hero-title
+     size) is set inline by js/splash.js once it knows the SVG's real
+     geometry — this is just a safety fallback if that JS doesn't run. */
+}
+
+.hero-tagline {
+  margin: 0;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-muted);
+}
+
+/* ---- example chips ---- */
+
+.example-chips {
+  text-align: center;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.chip {
   cursor: pointer;
-  border: 1px solid var(--color-accent);
-  background: var(--color-accent);
-  color: #fff;
-  border-radius: 6px;
-  padding: 0.55rem 0.9rem;
-  font-size: 0.9rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
 }
 
-#topic-submit:disabled,
-.playback-button:disabled {
+.chip:hover {
+  border-color: var(--color-accent);
+}
+
+.chip:disabled,
+.recent-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- topic form / chat box ---- */
+
+.topic-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.topic-textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 3.2rem;
+  max-height: 15rem;
+  overflow-y: auto;
+  resize: none;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  font-size: 1.1rem;
+  font-family: inherit;
+  color: var(--color-text);
+}
+
+.topic-textarea::placeholder {
+  color: var(--color-muted);
+}
+
+.topic-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(109, 139, 255, 0.35);
+}
+
+.topic-textarea:disabled {
+  opacity: 0.6;
+}
+
+.field-error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 0.85rem;
+}
+
+.primary-button {
+  flex-shrink: 0;
+  cursor: pointer;
+  border: none;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: #7d99ff;
+}
+
+.primary-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.link-button {
-  background: none;
-  color: var(--color-accent);
-  border: none;
-  padding: 0;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-}
-
 .status-line {
-  margin: 0.75rem 0;
-  color: var(--color-muted);
-  font-size: 0.88rem;
-  min-height: 1.2em;
-}
-
-.candidate-list {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.candidate-card {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 0.9rem 1rem;
-  background: #fff;
-}
-
-.candidate-one-liner {
-  margin: 0 0 0.5rem;
-}
-
-.candidate-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-bottom: 0.6rem;
-}
-
-.score-badge,
-.tag-badge,
-.flag-badge {
-  display: inline-block;
-  font-size: 0.72rem;
-  border-radius: 4px;
-  padding: 0.15rem 0.45rem;
-}
-
-.score-badge {
-  background: #eef2ff;
-  color: #2b3a8f;
-  font-weight: 600;
-}
-
-.tag-badge {
-  background: #eee;
-  color: #444;
-}
-
-.flag-badge {
-  background: #fdecea;
-  color: #a02a2a;
-  border: 1px solid #f2b8b5;
-}
-
-.paper-header {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-}
-
-.paper-number {
-  color: var(--color-muted);
-  font-size: 0.85rem;
-}
-
-.paper-title {
   margin: 0;
-}
-
-.category-badge {
-  background: #eee;
-  border-radius: 4px;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-}
-
-.paper-dek {
   color: var(--color-muted);
-}
-
-.verification-status {
   font-size: 0.85rem;
-  font-style: italic;
-  color: var(--color-muted);
+  min-height: 1.1em;
 }
 
-.windows-row {
+/* ---- recent searches ---- */
+
+.recent-list {
   display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  font-size: 0.82rem;
-  color: var(--color-muted);
-  border-top: 1px solid var(--color-border);
+  flex-direction: column;
+}
+
+.recent-item {
+  cursor: pointer;
+  background: none;
+  border: none;
   border-bottom: 1px solid var(--color-border);
-  padding: 0.5rem 0;
-  margin: 0.75rem 0;
+  color: var(--color-text);
+  text-align: left;
+  padding: 0.6rem 0;
+  font-size: 0.95rem;
 }
 
-.paper-section {
-  margin: 1.5rem 0;
+.recent-item:last-child {
+  border-bottom: none;
 }
 
-.paper-section h3 {
-  margin-bottom: 0.5rem;
-  font-size: 1rem;
-  border-bottom: 1px solid var(--color-border);
-  padding-bottom: 0.25rem;
-}
-
-.hook-list,
-.delivery-note-list,
-.source-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  gap: 0.6rem;
-}
-
-.hook-item,
-.source-card {
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 0.65rem 0.8rem;
-  background: #fff;
-}
-
-.hook-head {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.8rem;
-  color: var(--color-muted);
-}
-
-.hook-text {
-  margin: 0.3rem 0;
-  font-weight: 500;
-}
-
-.hook-note {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--color-muted);
-}
-
-.scene-list {
-  padding-left: 1.1rem;
-  display: grid;
-  gap: 0.6rem;
-}
-
-.scene-item {
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 0.6rem 0.8rem;
-  background: #fff;
-  list-style: decimal;
-}
-
-.scene-head {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  flex-wrap: wrap;
-  font-size: 0.85rem;
-}
-
-.scene-number {
-  color: var(--color-muted);
-}
-
-.scene-title {
-  font-weight: 600;
-}
-
-.scene-time {
-  margin-left: auto;
-  color: var(--color-muted);
-  font-size: 0.8rem;
-}
-
-.scene-description {
-  margin: 0.4rem 0 0;
-  font-size: 0.9rem;
-}
-
-.pacing-badge {
-  display: inline-block;
-  font-size: 0.72rem;
-  font-weight: 700;
-  border-radius: 4px;
-  padding: 0.1rem 0.4rem;
-  color: #fff;
-}
-
-.pacing-fast {
-  background: var(--color-fast);
-}
-
-.pacing-build {
-  background: var(--color-build);
-}
-
-.pacing-slow {
-  background: var(--color-slow);
-}
-
-.pacing-warm {
-  background: var(--color-warm);
-}
-
-.delivery-note-item {
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 0.5rem 0.8rem;
-  background: #fff;
-  display: flex;
-  gap: 0.6rem;
-}
-
-.delivery-note-label {
-  font-weight: 600;
-  color: var(--color-muted);
-  min-width: 70px;
-}
-
-.source-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-.source-title {
-  font-weight: 500;
-}
-
-.source-meta {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  font-size: 0.78rem;
-  color: var(--color-muted);
-  margin-top: 0.3rem;
-}
-
-.source-flags {
-  margin-top: 0.4rem;
-  display: flex;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-}
-
-.source-card.suppressed {
-  background: #fdecea;
-  border-color: #f2b8b5;
-}
-
-.suppression-notice {
-  margin-top: 0.5rem;
-  font-size: 0.82rem;
-  color: #7a1f1f;
-}
-
-.cta-text {
-  font-weight: 500;
-}
-
-.playback-stub {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.playback-button {
-  border: 1px solid var(--color-border);
-  background: #f1f1f1;
-  border-radius: 50%;
-  width: 2.4rem;
-  height: 2.4rem;
-}
-
-.playback-state {
-  font-size: 0.85rem;
-  color: var(--color-muted);
-}
-
-.export-gate {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.unlock-button {
-  background: #fff;
+.recent-item:hover {
   color: var(--color-accent);
 }
+
+/* ---- footer ---- */
 
 .app-footer {
-  max-width: 760px;
+  max-width: 640px;
   margin: 0 auto 2rem;
   padding: 0 1.5rem;
-  font-size: 0.78rem;
-  color: var(--color-muted);
 }
 
-.app-footer code {
-  background: #eee;
+.mock-data-note {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.72rem;
+}
+
+.mock-data-note code {
+  background: var(--color-surface);
   padding: 0.05rem 0.3rem;
   border-radius: 3px;
 }
