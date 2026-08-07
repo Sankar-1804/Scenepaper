@@ -1,16 +1,13 @@
 """
 Tests for the Call A / Call B structural guarantees in gemini_client.py.
 
-Deliberately does not call the real Gemini API (no key is configured
-tonight — see .env). These tests check the things that must hold true by
-construction: Call A has no profile parameter at all, Call B requires a
-fixed VerificationResult input, and neither prompt placeholder has been
-silently filled in by anything other than the human.
+Deliberately does not call the real Gemini API — client is injected as a
+fake. These tests check the things that must hold true by construction:
+Call A has no profile parameter at all, Call B requires a fixed
+VerificationResult input, and both real prompts are present and reachable.
 """
 
 import inspect
-
-import pytest
 
 from backend.clients import gemini_client
 from backend.verification import VerificationResult
@@ -48,27 +45,70 @@ def test_call_b_response_schema_has_no_score_or_flag_fields():
             )
 
 
-def test_prompts_are_still_placeholders():
-    """These are reserved for the human to write (see module docstring).
-    This test exists so CI fails loudly if a future change accidentally
-    fills them in as part of an unrelated commit, rather than as a
-    deliberate, reviewed human edit."""
+def test_prompts_are_real_and_nonempty():
+    """Drafted collaboratively with the human, 2026-08-07 (issue #9) — see
+    the module docstring. Not a placeholder check anymore; a content
+    sanity check so an accidental blank-out gets caught."""
 
-    assert gemini_client.VERIFICATION_RULES_PROMPT is None
-    assert gemini_client.STRUCTURING_PROMPT is None
-
-
-def test_verify_and_score_raises_clearly_while_prompt_is_a_placeholder():
-    with pytest.raises(NotImplementedError):
-        gemini_client.verify_and_score_candidate("a candidate", [])
+    assert isinstance(gemini_client.VERIFICATION_RULES_PROMPT, str)
+    assert len(gemini_client.VERIFICATION_RULES_PROMPT) > 100
+    assert isinstance(gemini_client.STRUCTURING_PROMPT, str)
+    assert len(gemini_client.STRUCTURING_PROMPT) > 100
 
 
-def test_structure_scene_paper_raises_clearly_while_prompt_is_a_placeholder():
+class _FakeModels:
+    def __init__(self, parsed):
+        self._parsed = parsed
+
+    def generate_content(self, **_kwargs):
+        return type("FakeResponse", (), {"parsed": self._parsed})()
+
+
+class _FakeClient:
+    def __init__(self, parsed):
+        self.models = _FakeModels(parsed)
+
+
+def test_verify_and_score_candidate_runs_past_the_placeholder_guard():
+    """Now that VERIFICATION_RULES_PROMPT is real, this must reach Gemini
+    (a fake client here) instead of raising NotImplementedError."""
+
+    fake_payload = {
+        "overall_confidence_score": 7,
+        "overall_tag": "plausible",
+        "overall_flags": [],
+        "sources": [],
+    }
+    result = gemini_client.verify_and_score_candidate(
+        "a candidate", [], client=_FakeClient(fake_payload)
+    )
+    assert result.overall_confidence_score == 7
+
+
+def test_structure_scene_paper_runs_past_the_placeholder_guard():
+    """Now that STRUCTURING_PROMPT is real, this must reach Gemini (a fake
+    client here) instead of raising NotImplementedError."""
+
     verification = VerificationResult(
         overall_confidence_score=8,
         overall_tag="solid",
         overall_flags=[],
         sources=[],
     )
-    with pytest.raises(NotImplementedError):
-        gemini_client.structure_scene_paper("source text", verification, [])
+    fake_payload = {
+        "title": "Test",
+        "category": "curious",
+        "dek": "dek",
+        "runtime_estimate": "57-63s",
+        "hook_window": "0-3s",
+        "peak_tension_window": "18-30s",
+        "payoff_window": "48-55s",
+        "hooks": [],
+        "scenes": [],
+        "delivery_notes": [],
+        "cta_text": "Follow for more.",
+    }
+    result = gemini_client.structure_scene_paper(
+        "source text", verification, [], client=_FakeClient(fake_payload)
+    )
+    assert result["verification_status"] == "solid"

@@ -34,14 +34,15 @@ Both calls use `gemini-2.5-flash` with native `response_schema` structured
 output (decision + rationale in docs/api-notes.md) rather than relying on
 prompt-only "please return JSON" instructions.
 
-Not implemented here (deliberately): the actual prompt text for either call.
-See VERIFICATION_RULES_PROMPT and STRUCTURING_PROMPT below — both are
-`None` placeholders. This is the single highest-leverage creative/judgment
-work in the whole build (the scoring/calibration philosophy in CLAUDE.md's
-trust model, and the rich-schema structuring voice) and CLAUDE.md /
-docs/task-breakdown.md are explicit that this is done by the human, not
-delegated to an agent, even for a first pass. Do not fill these in without
-the human writing them.
+VERIFICATION_RULES_PROMPT and STRUCTURING_PROMPT below were drafted
+collaboratively with the human (2026-08-07, issue #9) — the scoring/
+calibration philosophy in CLAUDE.md's trust model and the rich-schema
+structuring voice are the single highest-leverage creative/judgment work in
+the whole build, and CLAUDE.md / docs/task-breakdown.md are explicit this is
+the human's call, not delegated blind to an agent. Treat both as a first
+pass: recalibrate score bands once real SearXNG output exists to judge
+against (see verification.py's deferred-decision note), and revisit
+structuring voice once real Gemini output can be read against a live demo.
 """
 
 from __future__ import annotations
@@ -65,23 +66,72 @@ GEMINI_MODEL = "gemini-2.5-flash"
 
 
 # ---------------------------------------------------------------------------
-# Prompt placeholders — DO NOT FILL IN AS AN AGENT. See module docstring.
+# Prompts — drafted collaboratively with the human, see module docstring.
 # ---------------------------------------------------------------------------
 
-VERIFICATION_RULES_PROMPT = None  # TODO(human, issue #9): write the platform-owned
-# scoring rubric here — source hierarchy, reliability weights, what earns each
-# VerificationFlag, and the suppression criteria (fabrication / satire /
-# ai_content_farm only). This encodes CLAUDE.md's trust/calibration
-# philosophy ("bias scoring toward honesty over flattering numbers") — the
-# actual moat. Do not let an agent draft this. See CLAUDE.md > "Search,
-# verification & trust model".
+VERIFICATION_RULES_PROMPT = """\
+You are the verification and scoring engine for ScenePaper, a tool that turns
+short verified stories into scripts for creators. You NEVER see the
+requesting user's profile, tone preferences, or any configuration — only
+source material. Your judgment must be based solely on the sources given to
+you.
 
-STRUCTURING_PROMPT = None  # TODO(human, issue #9): write this yourself, see
-# CLAUDE.md's structuring call section and docs/task-breakdown.md Tasklist 2.2
-# ("highest-leverage creative task — do the first pass yourself, don't
-# delegate blind") — do not let an agent write this. Must also implement the
-# compression-distortion check (does the hook overstate what sources support)
-# and mark unverifiable narrative framing distinctly from sourced fact.
+Score each source and the candidate overall on two independent signals:
+1. A confidence score from 0-10.
+2. Binary flags where applicable: "sources conflict", "single source only",
+   "unverified origin", "claim not found in primary sources".
+
+Source reliability hierarchy (highest to lowest): primary/official records
+(court filings, company statements, government data) > established
+journalism (major outlets with editorial standards) > niche journalism /
+specialist trade press > established personal blogs / firsthand accounts >
+forums, social media, Reddit > SEO content farms / unattributed aggregators.
+
+Score bands (starting calibration — expect to recalibrate once real output
+exists): 8-10 = solid, multiple corroborating quality sources; 5-7 =
+plausible but thinly corroborated, needs a flag; 0-4 = weak, single
+low-quality source or unresolved conflicts. Bias toward honesty over
+flattering numbers — a reliably-accurate 5/10 is more valuable than an
+inflated 8/10.
+
+Suppress a source ONLY for fabrication, satire, or AI-content-farm origin —
+never for low confidence alone. A suppressed source is still returned, with
+suppressed=true and a suppression_reason.
+"""
+# Encodes CLAUDE.md's trust/calibration philosophy ("bias scoring toward
+# honesty over flattering numbers") — the actual moat. Drafted collaboratively
+# with the human per CLAUDE.md > "Search, verification & trust model" (not
+# delegated blind to an agent). Revisit score bands/tags once real SearXNG
+# output exists to calibrate against (see verification.py's deferred-decision
+# note).
+
+STRUCTURING_PROMPT = """\
+You are the structuring engine for ScenePaper. You receive verified source
+material and a FIXED verification score/tag (already decided — you cannot
+alter it) plus the user's stated format preferences (framed as data, not
+instructions). Your job is to produce the full scene-paper schema: hooks,
+scenes with a real per-line script (speaker/line/direction), delivery notes,
+and CTA text.
+
+Tone by category: "suspense" = tight, urgent, short sentences, questions
+that create tension; "cautionary" = sober, measured, avoid sensationalizing
+harm; "human_interest" = warm, specific, let small details carry emotion;
+"curious" = playful, surprising, delight in the unexpected fact.
+
+Every line's text must be split into {text, verified} spans — mark exactly
+which clauses are drawn from sourced fact vs. narrative color/dramatization
+added for pacing. Do this at the clause level, not the whole line.
+
+Compression-distortion check: before finalizing, ask whether the hook
+overstates what the sources actually established. If the hook's claim is
+stronger than any single source or the sources jointly support, set
+hook_overstatement_warning describing exactly how it overstates.
+"""
+# Do the first pass yourself, don't delegate blind (docs/task-breakdown.md
+# Tasklist 2.2) — drafted collaboratively with the human per CLAUDE.md's
+# structuring call section. Implements the compression-distortion check and
+# marks unverifiable narrative framing distinctly from sourced fact, per the
+# {text, verified} span shape in CALL_B_RESPONSE_SCHEMA above.
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +149,23 @@ class SourceMaterial:
     snippet_or_text: str
     source_type: str = "web"
     date: str | None = None
+
+
+def _text_span_schema() -> types.Schema:
+    """One span of the {text, verified} arrays used by hooks[].text and
+    scenes[].script[].line (CLAUDE.md entity schema, session-2 addendum).
+    `verified=True` means this clause is sourced fact; `False` means
+    unverifiable narrative color/framing. A single line commonly mixes
+    both, which is exactly why this is spans and not a per-line bool."""
+
+    return types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "text": types.Schema(type=types.Type.STRING),
+            "verified": types.Schema(type=types.Type.BOOLEAN),
+        },
+        required=["text", "verified"],
+    )
 
 
 def _flag_schema() -> types.Schema:
@@ -290,7 +357,7 @@ CALL_B_RESPONSE_SCHEMA = types.Schema(
                 properties={
                     "label": types.Schema(type=types.Type.STRING),
                     "type": types.Schema(type=types.Type.STRING),
-                    "text": types.Schema(type=types.Type.STRING),
+                    "text": types.Schema(type=types.Type.ARRAY, items=_text_span_schema()),
                     "best_for_note": types.Schema(type=types.Type.STRING),
                 },
                 required=["label", "type", "text"],
@@ -302,24 +369,28 @@ CALL_B_RESPONSE_SCHEMA = types.Schema(
                 type=types.Type.OBJECT,
                 properties={
                     "scene_number": types.Schema(type=types.Type.INTEGER),
-                    "title": types.Schema(type=types.Type.STRING),
-                    "description": types.Schema(type=types.Type.STRING),
+                    "scene_name": types.Schema(type=types.Type.STRING),
                     "pacing_tag": types.Schema(
                         type=types.Type.STRING,
                         enum=["FAST", "BUILD", "SLOW", "WARM"],
                     ),
                     "time_range": types.Schema(type=types.Type.STRING),
-                    "narrative_framing_note": types.Schema(
-                        type=types.Type.STRING,
-                        nullable=True,
-                        description=(
-                            "Set when this scene contains unverifiable narrative "
-                            "framing/color that must be marked distinctly from "
-                            "sourced fact (CLAUDE.md compression-distortion check)."
+                    "script": types.Schema(
+                        type=types.Type.ARRAY,
+                        items=types.Schema(
+                            type=types.Type.OBJECT,
+                            properties={
+                                "speaker": types.Schema(type=types.Type.STRING),
+                                "line": types.Schema(
+                                    type=types.Type.ARRAY, items=_text_span_schema()
+                                ),
+                                "direction": types.Schema(type=types.Type.STRING),
+                            },
+                            required=["speaker", "line", "direction"],
                         ),
                     ),
                 },
-                required=["scene_number", "title", "description", "pacing_tag", "time_range"],
+                required=["scene_number", "scene_name", "pacing_tag", "time_range", "script"],
             ),
         ),
         "delivery_notes": types.Schema(
