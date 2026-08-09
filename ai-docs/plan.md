@@ -1,92 +1,146 @@
-# ui-agent — Plan (written 2026-08-07)
+# ui-agent — Plan (rewritten 2026-08-09, ~20:00)
 
-Written as part of a full plan-file pass across all 4 active agents before
-simultaneous deployment. Read `CLAUDE.md`'s Agent Loop Strategy first.
+**You are the `ui-agent`, working in `scenepaper-ui` on branch
+`feature/web-ui`. Read `agents/ui-agent.md` for your role and `CLAUDE.md` for
+the project rules before touching code.**
 
-## Real current state (as of commit `05231f5`, just made this session)
+This supersedes the earlier version of this file — the screens you were asked
+to rebuild are done, and there is now a real backend to talk to.
 
-- **Screen 1 (topic input) was rebuilt with a new dark visual system**:
-  new theme (`src/web/css/styles.css`), splash-to-hero SVG logo handoff
-  (`src/web/js/splash.js`, `src/web/public/scenepaper-splash.svg`),
-  auto-growing textarea, example-topic chips, localStorage-backed recent
-  searches. Internally consistent, `node --check` clean on all 3 JS files,
-  no dangling DOM refs.
-- **This was a deliberate staged redesign, and it deleted working
-  functionality on the way in.** Before this commit (`05231f5~1`, i.e. the
-  merged PR #22 baseline), `mockApi.js` had `searchStoryIdeas()`,
-  `generateScenePaper()`, `getUsageStatus()`, `setExportUnlocked()` and
-  `app.js` rendered a full candidate picker (Screen 2) and full ScenePaper
-  detail view (Screen 3) — hooks[], scenes[] with pacing badges,
-  sources[] including a suppressed-source example with its
-  `suppression_reason`, a disabled/honest playback stub, and the mocked
-  usage counter + export lock/unlock toggle. All of that is gone from the
-  working tree right now; submitting a topic on Screen 1 just shows a stub
-  message ("handing off to the generation screen ... not built yet").
-- **User's explicit decision (2026-08-07): continue the rebuild-from-
-  scratch approach and restore Screens 2/3 after**, accepting the
-  temporary regression rather than retrofitting the new theme onto the old
-  screens. Committed and pushed as-is this session
-  (`feature/web-ui`, `05231f5`).
-- `getUsageStatus` still exists in the current `mockApi.js` but nothing in
-  `app.js` calls it yet — reserved, per its own comment, for a future
-  Settings screen. Leave as-is, don't wire it prematurely.
+## First action: commit this plan file
 
-## Work item 1 — Rebuild Screen 2 (candidate picker) in the new theme
+Before any other work, commit **this file only** to `feature/web-ui`:
 
-Tag: **afk** — spec is fully defined (CLAUDE.md entity schema + the prior
-working implementation as direct reference), success is visually/
-functionally checkable against that reference, doesn't touch another
-agent's files.
+```
+git add ai-docs/plan.md
+git commit -m "Add ui-agent plan for the pipeline integration push"
+git push
+```
 
-Reference implementation to port forward (do not copy verbatim — reimplement
-in the new dark visual language): `git show 05231f5~1:src/web/js/mockApi.js`
-for `searchStoryIdeas(topic)` and `git show 05231f5~1:src/web/js/app.js` for
-how the candidate picker was rendered (confidence_score/tag/flags display,
-suppressed-source framing).
+It is the record of what you were asked to do, so it should exist in git
+before the work starts. This one commit does not need a checkpoint — it is
+a doc file the user has already approved. **Everything after it does.**
+
+## Follow the loop in CLAUDE.md
+
+ORIENT → PLAN → ACT → VERIFY → **CHECKPOINT** → COMMIT. Present the diff and
+wait for explicit approval before committing.
+
+Stay inside this worktree. Do not edit `scenepaper-api`,
+`scenepaper-catalyst`, or `scenepaper-mcp`.
+
+---
+
+## What is already done
+
+All screens are built and working against mock data: topic input, candidate
+picker (scores, flags, show-more, exhaustion and failure states, suppressed
+candidates with their reason), paper detail, scene detail (script lines,
+speaker variants, pause pills, claims list), playback at both paper and scene
+scope, the mocked usage counter and export toggle, plus a generation-progress
+screen.
+
+**Your `claims[]` design won.** The schema fork you flagged rather than
+resolving alone was taken to the user, who adopted your shape as canonical.
+`CALL_B_RESPONSE_SCHEMA` and `CLAUDE.md` now match the web client:
+
+- `hooks[].text` → `[{text, verified}]` inline spans
+- `scenes[].claims[]` → `[{text, verified, sources[]}]`
+- `scenes[].script[].line` → **plain string**
+
+No UI change needed for that — the backend moved to you. Flagging it instead
+of silently picking one was the right call.
+
+---
+
+## The backend is now real
+
+Base URL: `https://scenepaper-60081628315.development.catalystserverless.in`
+
+| What you call | Route |
+|---|---|
+| search candidates | `POST /ideate` — body `{"topic": "..."}` |
+| generate a paper | `POST /generate` — body `{"topic": ..., "candidate": {...}}` |
+| fetch a paper | `GET /paper?id=<paper_id>` |
+| update / delete | `PUT` / `DELETE /paper?id=<paper_id>` |
+
+**Read this carefully — it will bite you otherwise:**
+
+1. **Papers use `?id=`, NOT `/paper/<id>`.** The API Gateway rewrites each rule
+   to a fixed path and cannot carry a per-request id, so the query-param form
+   is the only one that works. Do not "fix" this to look more RESTful.
+2. **`POST /generate` is asynchronous.** It returns **202** immediately with
+   `{job_id, paper_id, status: "accepted"}` — the paper does **not** exist yet.
+   You must poll `GET /paper?id=<paper_id>` until it appears. Your existing
+   generation-progress screen is exactly the right home for this.
+3. **Generation is slow — expect 15–30+ seconds.** The structuring call alone
+   is ~15s. Design the poll interval and the progress copy around that, and
+   make sure a slow run doesn't look like a hang.
+4. `/ideate` currently returns `[stub] Candidate A/B/C`. That's expected —
+   `api-integration-agent` is making it real. Build against the real shape and
+   the stubs will simply become good data.
+5. No authentication. Don't add auth handling.
+
+---
+
+## Work item 1 — Switch off mock data (your main task)
+
+**Tag: hil** — this is the first time the UI meets a real backend, and things
+will be uneven.
+
+`mockApi.js` has `USE_MOCK_DATA = true` and three functions that throw
+`"Real API not wired up yet"`. Wire them to the routes above.
 
 Steps:
-1. Re-add `searchStoryIdeas(topic)` to `mockApi.js` (mock data path only —
-   `USE_MOCK_DATA` stays `true`, real `fetch()` calls stay commented out
-   per the existing convention in this file, since there's no live backend
-   endpoint yet).
-2. Build the candidate-picker screen in the new dark theme/component style
-   established by Screen 1 (reuse the chip/card visual language already
-   built for example-topic chips where it fits).
-3. Wire Screen 1's topic submit to actually transition to this screen
-   instead of the current stub status message.
-4. Verify headlessly (the `run` skill's prior approach — scratch Playwright
-   install — worked well last session for this) before calling it done.
+1. Put the base URL in one place, overridable, so it isn't scattered.
+2. Implement the real paths for `searchStoryIdeas`, `generateScenePaper`, and
+   the paper fetch. **Keep the mock path working** behind the flag — a
+   backend outage 20 minutes before a demo should not leave you with nothing
+   to show. This is deliberate demo insurance, not indecision.
+3. Implement polling for `POST /generate` → `GET /paper?id=` on the progress
+   screen, with a sane timeout and an honest failure state.
+4. Handle real error shapes: the backend returns
+   `{"status":"error","message":"..."}` with 400/404/502/503. Surface the
+   message rather than a generic failure.
+5. Verify in a real browser, not just by reading code. The `run` skill's prior
+   approach (a scratch Playwright install) worked well.
 
-## Work item 2 — Rebuild Screen 3 (paper detail) in the new theme
+## Work item 2 — Decide where the design files live
 
-Tag: **afk**, same reasoning as item 1. Depends on item 1 (candidate
-picker needs to hand off to this screen).
+Three files are sitting **untracked at the repo root**: `Design README.md`,
+`ScenePaper.dc.html`, `nocturne-styles.css`. `CLAUDE.md` calls the repo layout
+"fixed and non-negotiable" (`README.md`, `ai-docs/`, `docs/`, `agents/`,
+`src/`), so root-level files break it. `ScenePaper.dc.html` also references
+`./support.js` and `_ds/` paths that don't exist, so it isn't functional.
 
-Reference: `git show 05231f5~1:src/web/js/mockApi.js` for
-`generateScenePaper(candidate)` / `getUsageStatus()`, and `app.js` for the
-full-schema render — this is the important one to get right, since it's
-"what makes the demo look finished" per CLAUDE.md. Must render:
-- `hooks[]` (now `{text, verified}` span arrays per the session-2 schema
-  addendum — check with api-integration-agent's plan.md / CLAUDE.md before
-  assuming plain strings)
-- `scenes[]` with pacing-tag badges and the real per-line `script[]`
-  (`{speaker, line, direction}`, `line` also span arrays)
-- `sources[]`, including at least one suppressed-source example rendered
-  with its `suppression_reason` (this is a real demo moment per the trust
-  model, don't drop it)
-- disabled/honest playback stub
-- mocked usage counter + export lock/unlock toggle (`setExportUnlocked`)
+Move them under `docs/` or add them to `.gitignore` — ask the user which, and
+don't commit them to root either way.
 
-## Work item 3 — Visual polish pass (deferred, HIL)
+## Work item 3 — Visual polish (deferred, HIL)
 
-Explicitly a judgment call per `agents/ui-agent.md` ("does this look
-finished") — not for a fresh session to self-judge. Do items 1/2 first,
-then have the user look at the full flow before spending more time on
-visual refinement.
+Explicitly a judgment call per `agents/ui-agent.md`. Do work item 1 first —
+a polished UI showing fake data is worth less than a plain one showing real
+data. Get the user to look at the real end-to-end flow before spending more
+time here.
 
-## Order for a fresh session executing this file
+---
 
-1. Work item 1, then item 2 (item 2 depends on item 1's hand-off existing).
-2. Checkpoint with the user (screenshot or headless-run confirmation) before
-   considering issue #11 demo-ready again.
-3. Work item 3 only after the user has actually looked at 1+2 restored.
+## Verification before any checkpoint
+
+```
+node --check src/web/js/app.js
+node --check src/web/js/mockApi.js
+node --check src/web/js/splash.js
+```
+Then actually run it and click through: topic → candidates → generate →
+progress → paper → scene detail.
+
+## Housekeeping
+
+`src/web/public/mock-voiceover.wav` (1.8 MB) is committed and referenced by
+`mockApi.js` — keep it. It's your fallback if real TTS isn't ready by demo
+time, and the player already handles it.
+
+Two dead refs in `app.js` (`els.status`, `els.submitButton`) are captured but
+never used — harmless leftovers from the Screen 1 rebuild, clean up if you're
+in the area.
