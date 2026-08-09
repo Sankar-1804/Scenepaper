@@ -92,7 +92,7 @@ ScenePaper
   hooks[]                   # [{label, type, text, best_for_note}]
                             # `text` is `[{text, verified}]` -- an array of spans, not a plain
                             # string (see below).
-  scenes[]                  # [{scene_number, scene_name, pacing_tag, time_range, script[]}]
+  scenes[]                  # [{scene_number, scene_name, pacing_tag, time_range, script[], claims[]}]
                             # script[] = [{speaker, line, direction}] -- a real script, not a
                             # one-line summary. `speaker` is "SPEAKER" for single-voice scenes;
                             # when a scene genuinely needs more than one, suffix with numbers
@@ -100,19 +100,33 @@ ScenePaper
                             # pause guidance for that specific line (e.g. "drop pace here,
                             # [pause 0.6s] before the reveal") -- written so it could be fed close
                             # to directly into Voicebox.
-                            # `line` is `[{text, verified}]` -- an array of spans, NOT a plain
-                            # string (decided when ui-agent asked how rule 5's verified-fact-vs-
-                            # narrative-framing distinction should actually be represented in the
-                            # data). Concatenate `text` fields in order to reconstruct the full
-                            # line; each span's `verified` bool says whether that specific clause
-                            # is sourced fact or unverifiable narrative color. Chosen over a
-                            # coarse per-line/per-hook bool because a single line frequently mixes
-                            # both (e.g. a documented fact followed by a dramatized flourish in
-                            # the same sentence) -- a per-line bool can't represent that without
-                            # either burying the verified part under a warning or hiding the
-                            # framing part entirely, which defeats the point of the rule. Same
-                            # span shape applies to `hooks[].text` above, so the UI has one
-                            # rendering pattern for both instead of two.
+                            # `line` is a PLAIN STRING (revised 2026-08-09 -- see below).
+                            # claims[] = [{text, verified, sources[]}] -- the scene's substantive
+                            # assertions restated one by one, each marked sourced-fact or
+                            # narrative-framing, with `sources[]` ([{title, date}]) cited when
+                            # verified=true.
+                            #
+                            # RULE 5 HAS TWO MECHANISMS, DELIBERATELY (revised 2026-08-09, after
+                            # the ui-agent's Screen 4 work surfaced a real fork between the web
+                            # client and the backend schema):
+                            #   hooks[].text      -> [{text, verified}] inline spans
+                            #   scenes[].claims[] -> separate per-scene list, `line` stays plain
+                            # An earlier version of this file mandated spans for BOTH, on the
+                            # reasoning that one rendering pattern beats two. That was reversed
+                            # for a real reason: hooks are one or two sentences, where inline
+                            # clause-level marks read well and precision is the whole point;
+                            # scene scripts are long and meant to be read ALOUD, where marks
+                            # scattered mid-sentence fight with the creator actually performing
+                            # the line. claims[] also carries something spans structurally
+                            # cannot -- per-claim `sources[]`, tying a specific claim to the
+                            # specific evidence behind it.
+                            # The accepted tradeoff: a claim RESTATES an assertion rather than
+                            # marking the literal words, so the exact "which words are unsourced"
+                            # mapping is kept for hooks and lost for scene lines.
+                            # Both shapes are enforced by CALL_B_RESPONSE_SCHEMA in
+                            # src/backend/clients/gemini_client.py and rendered by
+                            # scenepaper-ui's app.js -- changing either side alone breaks the
+                            # integration.
   delivery_notes[]          # [{label, note}] -- CTA-level notes ONLY now. Per-scene/per-line
                             # delivery guidance moved into scenes[].script[].direction (session-2
                             # addendum, decided after reviewing the mock UI's one-liner scenes and
