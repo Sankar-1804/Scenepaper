@@ -1,137 +1,148 @@
-# catalyst-agent — Plan (written 2026-08-07)
+# catalyst-agent — Plan (rewritten 2026-08-09, ~20:00)
 
-Written as part of a full plan-file pass across all 4 active agents before
-simultaneous deployment. Read `CLAUDE.md`'s Agent Loop Strategy first — this
-file is the PLAN step's output; ACT still means small reviewable diffs, and
-step 5 (checkpoint before commit) is non-negotiable.
+**You are the `catalyst-agent`, working in `scenepaper-catalyst` on branch
+`feature/catalyst-backend`. Read `agents/catalyst-agent.md` for your role and
+`CLAUDE.md` for the project rules before touching code.**
 
-## Real current state (verified directly against code + git history, not
-just docs/task-breakdown.md's checkboxes, which are stale)
+This supersedes the earlier version of this file — your previous work item is
+done, and the API Gateway blocker is resolved.
 
-- `functions/scenepaper_pipeline/main.py`: full routing skeleton for
-  `POST /ideate`, `POST /generate`, `GET|PUT|DELETE /paper/:id`, real input
-  validation, correct status codes. `POST /generate` genuinely submits a Job
-  via `zcatalyst_sdk`'s `job_scheduling().job().submit_job(...)` against a
-  **real deployed** Job Pool (`scenepaper_job_pool`, id
-  `59024000000020001`) and Job function (`scenepaper_pipeline_job`, id
-  `59024000000021001`) — done last commit (`20aac49`).
-- `functions/scenepaper_pipeline_job/main.py`: real job-function skeleton
-  (param validation, 5-stage walk, `context.close_with_success/failure`).
-  All 5 stages are stubs pending api-integration-agent's work.
-- `tests/test_scenepaper_pipeline_routes.py`: 19-check local harness with
-  fake Request/job_request/context objects — doubles as the curl-harness
-  deliverable from task-breakdown.
-- **Issue #1 (NoSQL) is CLOSED as of `21ed1a0`** — this is more resolved
-  than the stub comments in `main.py` currently admit. Real tables exist in
-  console:
-  - `ScenePaper` — partition key `id` (String), no sort key, secondary
-    index `category_index` (partition key `category`, String)
-  - `UserProfile` — partition key `id` (String), no sort key, no index
-  - Nested fields (`hooks`, `scenes`, `sources`, `image_set`, etc.) are NOT
-    pre-declared columns — written as part of the document body at insert
-    time.
-- **The stub comments in `main.py` (lines ~90-142) reference the wrong
-  SDK surface** — they say `.datastore().table(...)`, which is the
-  relational Data Store API. The real NoSQL runtime API is
-  `zcatalyst_sdk`'s `nosql` module (confirmed installed,
-  `zcatalyst-sdk==1.3.0`, path `zcatalyst_sdk/nosql/`) — this exists and
-  works at the SDK level even though neither the Catalyst CLI nor the
-  Catalyst MCP server expose NoSQL management (that gap is about
-  managing tables/indexes declaratively, not about runtime read/write,
-  which this SDK module handles directly against the tables already
-  created in console).
+## First action: commit this plan file
 
-## Work item 1 — Wire real NoSQL CRUD (UNBLOCKED, no hurdle remaining)
+Before any other work, commit **this file only** to `feature/catalyst-backend`:
 
-Replace `_stub_create_scenepaper` / `_stub_get_scenepaper` /
-`_stub_update_scenepaper` / `_stub_delete_scenepaper` in
-`functions/scenepaper_pipeline/main.py` with real calls. Tag: **afk** —
-spec is fully defined, success is machine-checkable (existing test harness
-already exercises found/not-found paths), doesn't touch another agent's
-files.
-
-Real SDK surface (verified by reading the installed package directly,
-`zcatalyst_sdk/nosql/_table_items.py` + `zcatalyst_sdk/types/nosql.py`):
-
-```python
-app = zcatalyst_sdk.initialize()
-table = app.nosql().get_table('ScenePaper')  # accepts name OR id directly
-
-# create
-result = table.insert_items({'item': {'id': paper_id, **payload}})
-
-# get
-result = table.fetch_item({'keys': [{'id': paper_id}]})
-
-# update — NoSqlItemUpdateAttributeOperation shape below is read from the
-# type stub but not yet exercised against a live call; verify
-# `update_value`'s exact key (likely {'value': <val>}) with one real test
-# call before trusting it blind:
-result = table.update_items({
-    'keys': {'id': paper_id},
-    'update_attributes': [
-        {'operation_type': 'PUT', 'attribute_path': [k], 'update_value': {'value': v}}
-        for k, v in updates.items()
-    ],
-})
-
-# delete
-result = table.delete_items({'keys': {'id': paper_id}})
+```
+git add ai-docs/plan.md
+git commit -m "Add catalyst-agent plan for the pipeline integration push"
+git push
 ```
 
-Steps:
-1. Replace the 4 stub functions with real `table.*` calls per above.
-2. Update the module docstring (lines ~1-33) and the stub-layer comment
-   block (lines ~80-87) — they still say "issue #1 is not resolved yet,"
-   which is now false and actively misleading to the next reader.
-3. Extend `tests/test_scenepaper_pipeline_routes.py`'s fake objects (or add
-   a `zcatalyst_sdk` mock) so the harness still runs without hitting a real
-   Catalyst project — don't make the test suite require live credentials.
-4. Do the same replacement for `UserProfile` wherever it's touched (check
-   if any route currently stubs it — if not, note it as follow-up, don't
-   invent new UserProfile routes not in scope).
-5. Run the local harness (`python3.9 tests/test_scenepaper_pipeline_routes.py`
-   — not pytest-discoverable, run directly, per the known gotcha) and
-   confirm all checks still pass.
-6. **Checkpoint** — present the diff before committing, per CLAUDE.md step
-   5. Then commit referencing issue #1/#8, push to `feature/catalyst-backend`.
+It is the record of what you were asked to do, so it should exist in git
+before the work starts. This one commit does not need a checkpoint — it is
+a doc file the user has already approved. **Everything after it does.**
 
-## Work item 2 — API Gateway route (BLOCKED on a manual console action)
+## Follow the loop in CLAUDE.md
 
-The CLI has no route-creation command (`apig:enable/disable/status` only,
-confirmed by reading `catalyst --help`), and the Catalyst MCP's
-`Configure_API_Gateway_Route` tool rejects its own documented `target` enum
-values (issue #3). This is a real tool bug, not a missing decision — the
-route has to be created by hand in the console:
+ORIENT → PLAN → ACT → VERIFY → **CHECKPOINT** → COMMIT. Present the diff and
+wait for explicit approval before committing. Never push to `main`.
 
-**Catalyst console → Scenepaper project → API Gateway → Add Route** →
-target `scenepaper_pipeline` (Advanced I/O Function), a path (e.g.
-`/generate`, or a catch-all covering all 5 routes above), methods
-`GET/POST/PUT/DELETE`.
+Stay inside this worktree. Do not edit `scenepaper-api`, `scenepaper-ui`, or
+`scenepaper-mcp`.
 
-This is a **hil** item with no code for a fresh session to write — it's
-listed here so the next session doesn't rediscover the CLI/MCP dead ends.
-Once done: confirm the deployed `/generate` → Job Pool path works over a
-real HTTP call (not just the local fake-object harness), and unblock
-mcp-agent's issue #3 (same underlying gap).
+---
 
-## Work item 3 — Wire real pipeline stages in the Job function (BLOCKED on
-api-integration-agent)
+## What is already done (verified live — don't redo it)
 
-`functions/scenepaper_pipeline_job/main.py`'s 5 stages (search+verify,
-structure, TTS, images, NoSQL write) are stubs. Do not start this until
-api-integration-agent's plan.md items land (SearXNG hosting, Voicebox
-verification, and — the biggest one — the Call A/Call B prompts, which are
-`None` placeholders as of this writing). When ready, this item is: import
-`src/backend/clients/*` and `src/backend/verification.py` into the job
-function and replace each stage stub with a real call, using work item 1's
-NoSQL wiring for the final write. Tag: **afk** once api-integration's
-pieces exist and are tested, since the seam is already clean.
+**Your Phase 1 work is complete and deployed.** The whole HTTP surface works
+against the real Catalyst project:
 
-## Order for a fresh session executing this file
+Base URL: `https://scenepaper-60081628315.development.catalystserverless.in`
 
-1. Work item 1 (fully unblocked, do this first).
-2. Flag work item 2 to the user as a pending manual step (don't block on
-   it — it's not something a session can do unattended).
-3. Watch for api-integration-agent's plan.md items landing on `main`, then
-   pick up work item 3.
+| Route | Status |
+|---|---|
+| `POST /ideate` | 200, returns candidates, rejects a missing topic with 400 |
+| `POST /generate` | 202 + `job_id` + `paper_id`; the job runs and reports SUCCESS |
+| `GET/PUT/DELETE /paper?id=<id>` | reads NoSQL, correct 400/404 |
+
+- **NoSQL CRUD is real** and reads are confirmed working against the live
+  `ScenePaper` table (partition key `id`, secondary index `category_index`).
+- **Job submission works**: Advanced I/O → Job Pool `scenepaper_job_pool`
+  (`59024000000020001`) → Job function `scenepaper_pipeline_job`
+  (`59024000000021001`). Verified: `job_status: SUCCESS`, 1.6s.
+- Issues **#1, #2, #3** are resolved.
+
+### Hard-won gotchas — these cost real time, don't rediscover them
+
+1. **`job_name` is capped at 20 characters.** Longer values make Catalyst
+   reject the *entire* job submission with `INVALID_INPUT`. Nothing in the SDK
+   signals this. Pinned by a check in the test harness.
+2. **The SDK must be initialized with the request.**
+   `zcatalyst_sdk.initialize(req=request)` runs `parse_headers_from_request`,
+   which establishes the invocation's credentials. Called bare, every job
+   submission and every NoSQL call fails. It is now initialized once at the
+   top of `handler()`; downstream bare calls inherit it. **Keep it that way.**
+3. **`.job` is a `@property`, not a method.** `app.job_scheduling().job` —
+   calling it (`.job()`) raises `TypeError: 'Job' object is not callable`.
+   Note the asymmetry: `job_scheduling()` *is* a method.
+4. **The API Gateway rewrites each rule to a fixed target path**, so it cannot
+   carry a per-request id. That's why `/paper` takes `?id=`, not `/paper/<id>`.
+   Three Gateway rules exist (`/ideate`, `/generate`, `/paper`), each with its
+   Target URL suffix set. `catalyst deploy` does **not** touch Gateway rules.
+5. **Never let a NoSQL failure return silently.** A bare
+   `except: return None` makes a real outage indistinguishable from "not
+   found". Failures are logged now — keep them logged.
+6. `catalyst functions:add` defaults `requirements.txt` to
+   `zcatalyst-sdk==1.4.0`, which needs Python ≥3.10 and breaks the 3.9 runtime.
+   **Always repin to `1.3.0`.**
+
+---
+
+## Work item 1 — Make the Job function real (your main task)
+
+`functions/scenepaper_pipeline_job/main.py` runs correctly but all **five
+stages are stubs** — it returns `"[stub] {topic}"` and never touches Gemini,
+SearXNG, TTS, images, or NoSQL. Making these real is what turns a working
+skeleton into a working product.
+
+**This depends on `api-integration-agent` landing `src/backend/orchestrator.py`
+on `main` first.** Check whether it exists before starting. If it doesn't yet,
+do work item 2 instead and come back.
+
+Steps once the orchestrator exists:
+1. Import the orchestrator into the Job function and replace the search +
+   verify + structure stages with a single call to it.
+2. Replace the final stage with a real NoSQL write of the returned ScenePaper
+   document, keyed on the `paper_id` passed in as a job param.
+3. Keep everything inside the Job function's 15-minute budget (the Advanced
+   I/O front door is capped at 30s, which is why this split exists — and Call
+   B alone takes ~15s, so the split is load-bearing, not optional).
+4. Preserve `context.close_with_success()` / `close_with_failure()` semantics.
+5. **Verify end to end for real:** `POST /generate`, then poll
+   `GET /paper?id=<paper_id>` until the document appears. That round trip
+   working is the definition of done for this item.
+
+Dependency note: the Job function runs on **Python 3.9**. Anything the
+orchestrator imports must be 3.9-compatible, and any new dependency must be
+added to the function's own `requirements.txt` (keeping `zcatalyst-sdk==1.3.0`).
+
+## Work item 2 — Prove NoSQL writes (small, unblocked, do this if blocked above)
+
+Reads are confirmed. **Writes are not** — no route currently creates a
+document (`_create_scenepaper` exists but nothing calls it), so the write path
+has never run against real Catalyst.
+
+Two things flagged and still unverified:
+- `update_value: {'value': v}` comes from the SDK type stubs, not a live call.
+- The SDK deserializes responses but sends requests raw, so writes may need
+  typed values (e.g. `{'S': 'text'}`) for non-scalar fields.
+
+Write one throwaway probe that inserts a small document, reads it back, updates
+it, and deletes it, against the real table. Report what the real payload shape
+has to be. That finding directly de-risks work item 1's final stage.
+
+## Work item 3 — UserProfile (only if there's slack)
+
+No route touches `UserProfile` yet. The free-tier counter
+(`scenepapers_generated_count`, `free_limit = 10`) needs somewhere to live.
+Coordinate with `ui-agent` on what it needs rather than inventing an API.
+
+---
+
+## Verification before any checkpoint
+
+```
+cd /Users/sankara-17600/Desktop/Personal/Projects/scenepaper-catalyst
+python3.9 tests/test_scenepaper_pipeline_routes.py
+```
+This is a standalone script, **not** pytest-discoverable — run it directly.
+All checks currently pass and it runs fully offline with an in-memory fake SDK.
+Keep it that way: tests must not require live Catalyst credentials.
+
+To deploy: `catalyst deploy --only functions` from this directory.
+
+## Known cosmetic debt
+
+`functions/scenepaper_pipeline_job/main.py` around lines 104–112 still carries
+a `TODO(issue #1)` documenting the **wrong** API (`app.datastore().table(...)`
+/ `insert_row`). Issue #1 is closed and the sibling file proves `nosql()` is
+correct. Fix that comment as part of work item 1 so it stops misleading people.
