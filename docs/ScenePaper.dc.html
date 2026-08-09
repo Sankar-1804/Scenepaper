@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/nocturne-bedbe7d5-5dc1-4d40-b607-9a0a7ae688c0/styles.css">
+  <script src="_ds/nocturne-bedbe7d5-5dc1-4d40-b607-9a0a7ae688c0/_ds_bundle.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+  <style>
+    /* Richer, true-black variant of the Nocturne ground for this app */
+    :root {
+      --color-bg: #000000;
+      --color-surface: #141319;
+      --color-accent: #a394f0;
+      --color-accent-2: #b6abe8;
+      --color-divider: color-mix(in srgb, #e9e9ed 14%, transparent);
+    }
+    body { margin: 0; }
+    a { color: var(--color-accent); text-decoration: none; }
+    a:hover { color: var(--color-accent-2); }
+    .sp-shell { min-height: 100vh; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); }
+    .sp-nav { display: flex; align-items: center; justify-content: space-between; padding: 18px 40px; border-bottom: 1px solid var(--color-divider); }
+    .sp-wordmark { font-family: var(--font-heading); font-weight: 500; font-size: 16px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+    .sp-page { max-width: 760px; margin: 0 auto; padding: 64px 32px 120px; }
+    .sp-page-wide { max-width: 980px; margin: 0 auto; padding: 48px 32px 120px; }
+    .sp-fade-in { animation: sp-fade 0.28s ease both; }
+    @keyframes sp-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    @media (prefers-reduced-motion: reduce) { .sp-fade-in { animation: none; } }
+    .sp-chip { border: 1px solid var(--color-divider); background: var(--color-surface); color: var(--color-text); font-size: 13px; padding: 7px 14px; border-radius: 999px; cursor: pointer; }
+    .sp-chip:hover { border-color: var(--color-accent); color: var(--color-accent); }
+  </style>
+</helmet>
+<div class="sp-shell sp-fade-in">
+
+  <div class="sp-nav">
+    <div class="sp-wordmark"><i class="ph ph-file-text" style="font-size:18px;color:var(--color-accent)"></i>ScenePaper</div>
+    <button class="btn btn-icon btn-secondary" title="Settings"><i class="ph ph-gear"></i></button>
+  </div>
+
+  <sc-if value="{{ isInput }}" hint-placeholder-val="{{ true }}">
+    <div class="sp-page sp-fade-in">
+      <div style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:10px">find a real story</div>
+      <h1 style="font-size:36px;margin-bottom:8px">What's the topic?</h1>
+      <p class="text-muted" style="font-size:14px;margin-bottom:28px">We search for verifiable stories and cite every claim — never generated from a prompt.</p>
+
+      <div style="display:flex;gap:10px;margin-bottom:14px">
+        <input class="input" style="height:52px;font-size:16px" placeholder="Snapchat, a founder who almost gave up, an underdog comeback…" value="{{ topicInput }}" onChange="{{ onTopicChange }}" onKeyDown="{{ onTopicKeyDown }}"></input>
+        <button class="btn btn-primary" style="height:52px;padding-inline:22px;font-size:15px;white-space:nowrap" onClick="{{ submitTopic }}"><i class="ph ph-magnifying-glass"></i>&nbsp;Find stories</button>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:36px">
+        <sc-for list="{{ chips }}" as="chip" hint-placeholder-count="4">
+          <button class="sp-chip" onClick="{{ chip.pick }}">{{ chip.label }}</button>
+        </sc-for>
+      </div>
+
+      <div class="hr"></div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0">
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="ph ph-user-circle" style="font-size:20px;color:var(--color-neutral-500)"></i>
+          <div>
+            <div style="font-size:13px">Business &amp; tech stories · direct, confident tone · 45–60s runtime</div>
+            <div class="text-muted" style="font-size:11px">Active creator profile</div>
+          </div>
+        </div>
+        <button class="btn btn-ghost" style="font-size:13px">Edit</button>
+      </div>
+
+      <div class="hr"></div>
+
+      <div style="padding:18px 0 4px">
+        <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:12px">recent searches</div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <sc-for list="{{ recentSearches }}" as="r" hint-placeholder-count="3">
+            <button onClick="{{ r.pick }}" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:10px;padding:9px 4px;font-size:14px;color:var(--color-text)" onMouseOver="event.currentTarget.style.color='var(--color-accent)'" onMouseOut="event.currentTarget.style.color='var(--color-text)'">
+              <i class="ph ph-arrow-counter-clockwise" style="font-size:14px;color:var(--color-neutral-500)"></i>{{ r.label }}
+            </button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="margin-top:32px;font-size:12px;color:var(--color-neutral-600)">3 of 10 free scene papers used this month</div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isCandidates }}" hint-placeholder-val="{{ false }}">
+    <div class="sp-page-wide sp-fade-in">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span class="text-muted" style="font-size:13px">Searching for</span>
+        <span style="font-size:15px;font-weight:500">"{{ topicInput }}"</span>
+        <button class="btn btn-ghost" style="font-size:12px" onClick="{{ editTopic }}">edit</button>
+      </div>
+      <h2 style="font-size:26px;margin-bottom:6px">Pick a story to script</h2>
+      <p class="text-muted" style="font-size:14px;margin-bottom:28px">{{ resultContextLine }}</p>
+
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:22px">
+        <sc-for list="{{ candidateCards }}" as="c" hint-placeholder-count="3">
+          <div class="card elev-sm" style="padding:18px;cursor:pointer;border:1px solid transparent" onClick="{{ c.pick }}" onMouseOver="event.currentTarget.style.borderColor='var(--color-accent)'" onMouseOut="event.currentTarget.style.borderColor='transparent'">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+              <div style="font-size:15px;line-height:1.4;font-weight:500;flex:1">{{ c.one_liner }}</div>
+              <div style="text-align:right;flex:none">
+                <div style="font-family:var(--font-heading);font-size:26px;font-weight:500;line-height:1" style="{{ c.scoreColor }}">{{ c.score }}<span style="font-size:13px;color:var(--color-neutral-500)">/10</span></div>
+              </div>
+            </div>
+            <div>
+              <span class="tag" style="{{ c.tagStyle }}">{{ c.tag }}</span>
+            </div>
+            <sc-if value="{{ c.hasFlags }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                <sc-for list="{{ c.flags }}" as="f" hint-placeholder-count="1">
+                  <span class="tag tag-outline" style="border-color:oklch(70% 0.14 70);color:oklch(78% 0.13 70);display:inline-flex;align-items:center;gap:4px"><i class="ph ph-warning" style="font-size:11px"></i>{{ f }}</span>
+                </sc-for>
+              </div>
+            </sc-if>
+            <div class="hr" style="margin:6px 0"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div class="card-meta"><i class="ph ph-files" style="font-size:13px"></i>{{ c.source_count }} sources</div>
+              <div class="card-meta" style="text-transform:capitalize">{{ c.angle_type }} · {{ c.era }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-bottom:8px">
+        <button class="btn btn-secondary"><i class="ph ph-arrow-clockwise"></i>&nbsp;Show me more</button>
+        <button class="btn btn-secondary"><i class="ph ph-sliders-horizontal"></i>&nbsp;Narrow it down</button>
+      </div>
+
+      <div class="hr" style="margin-top:36px"></div>
+      <div style="display:flex;align-items:center;gap:8px;margin:20px 0 16px">
+        <i class="ph ph-eye-slash" style="font-size:14px;color:var(--color-neutral-500)"></i>
+        <span style="font-size:12px;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-neutral-500)">suppressed — filtered by the verification layer</span>
+      </div>
+      <sc-for list="{{ suppressedCards }}" as="s" hint-placeholder-count="1">
+        <div class="card" style="padding:16px;background:transparent;border:1px dashed var(--color-divider);opacity:0.7;margin-bottom:10px">
+          <div style="font-size:14px;text-decoration:line-through;color:var(--color-neutral-400)">{{ s.one_liner }}</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);display:flex;gap:6px;align-items:flex-start"><i class="ph ph-x-circle" style="font-size:13px;flex:none;margin-top:2px"></i>{{ s.suppression_reason }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isProgress }}" hint-placeholder-val="{{ false }}">
+    <div class="sp-page sp-fade-in" style="padding-top:96px">
+      <div class="text-muted" style="font-size:12px;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:8px">building your scene paper</div>
+      <div style="font-size:19px;font-weight:500;margin-bottom:44px;line-height:1.4">{{ selectedOneLiner }}</div>
+      <div style="display:flex;flex-direction:column;gap:0">
+        <sc-for list="{{ progressSteps }}" as="step" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--color-divider)">
+            <div style="width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center" style="{{ step.iconWrapStyle }}">
+              <i class="{{ step.iconClass }}" style="font-size:14px"></i>
+            </div>
+            <div style="font-size:15px" style="{{ step.textStyle }}">{{ step.label }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isPaper }}" hint-placeholder-val="{{ false }}">
+    <div class="sp-page sp-fade-in">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="text-muted" style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase">paper #{{ paper.paper_number }} · {{ paper.category }}</div>
+        <button class="btn btn-ghost" style="font-size:12px" onClick="{{ backToCandidates }}"><i class="ph ph-arrow-left"></i>&nbsp;back to candidates</button>
+      </div>
+      <h1 style="font-size:38px;margin-bottom:12px">{{ paper.title }}</h1>
+      <p style="font-size:17px;color:var(--color-neutral-300);line-height:1.5;margin-bottom:20px">{{ paper.dek }}</p>
+
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:24px">
+        <div class="tag" style="{{ paperScoreTagStyle }};font-size:13px;padding:5px 12px;display:flex;align-items:center;gap:6px"><i class="ph-fill ph-shield-check"></i>{{ paper.verification_score }}/10 · {{ paper.verification_tag }}</div>
+        <div class="text-muted" style="font-size:13px;display:flex;align-items:center;gap:5px"><i class="ph ph-files"></i>{{ paper.source_count }} verified sources</div>
+      </div>
+
+      <div class="card" style="flex-direction:row;align-items:center;gap:14px;padding:12px 16px;margin-bottom:32px">
+        <button class="btn btn-icon btn-primary" onClick="{{ toggleAudio }}"><i class="{{ audioIconClass }}"></i></button>
+        <div style="flex:1;height:4px;border-radius:2px;background:var(--color-neutral-800);position:relative"><div style="{{ audioProgressStyle }}"></div></div>
+        <div class="text-muted" style="font-size:12px;font-family:var(--font-body);white-space:nowrap">{{ audioTimeLabel }}</div>
+      </div>
+
+      <h6 style="margin-bottom:14px">hooks — pick your opening</h6>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:36px">
+        <sc-for list="{{ hooks }}" as="h" hint-placeholder-count="2">
+          <div class="card elev-sm" style="padding:16px;cursor:pointer" style="{{ h.cardStyle }}" onClick="{{ h.select }}">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div class="card-kicker">{{ h.label }} — {{ h.type }}</div>
+              <sc-if value="{{ h.selected }}" hint-placeholder-val="{{ false }}"><i class="ph-fill ph-check-circle" style="color:var(--color-accent)"></i></sc-if>
+            </div>
+            <div style="font-family:Georgia,'Times New Roman',serif;font-style:italic;font-size:17px;line-height:1.45;margin:6px 0">{{ h.text }}</div>
+            <div class="text-muted" style="font-size:12px">{{ h.best_for_note }}</div>
+          </div>
+        </sc-for>
+      </div>
+
+      <h6 style="margin-bottom:14px">timing</h6>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:36px">
+        <sc-for list="{{ timingTiles }}" as="t" hint-placeholder-count="4">
+          <div class="card" style="padding:14px">
+            <div class="text-muted" style="font-size:11px;letter-spacing:0.05em;text-transform:uppercase;margin-bottom:6px">{{ t.label }}</div>
+            <div style="font-family:var(--font-heading);font-size:20px;font-weight:500">{{ t.value }}</div>
+          </div>
+        </sc-for>
+      </div>
+
+      <h6 style="margin-bottom:14px">scenes</h6>
+      <div style="border:1px solid var(--color-divider);border-radius:var(--radius-md);overflow:hidden;margin-bottom:36px">
+        <sc-for list="{{ scenesList }}" as="sc" hint-placeholder-count="4">
+          <div onClick="{{ sc.open }}" style="display:flex;align-items:center;gap:14px;padding:14px 16px;cursor:pointer;border-bottom:1px solid var(--color-divider)" onMouseOver="event.currentTarget.style.background='color-mix(in srgb, var(--color-text) 4%, transparent)'" onMouseOut="event.currentTarget.style.background='transparent'">
+            <div style="font-family:var(--font-heading);font-size:13px;color:var(--color-neutral-500);width:16px">{{ sc.scene_number }}</div>
+            <div style="flex:1;font-size:14px;font-weight:500">{{ sc.title }}</div>
+            <div style="font-family:var(--font-heading);font-size:12px;color:var(--color-neutral-400)">{{ sc.time_range }}</div>
+            <span class="tag" style="{{ sc.paceChipStyle }};min-width:56px;text-align:center">{{ sc.pacing_tag }}</span>
+            <i class="ph ph-caret-right" style="color:var(--color-neutral-500)"></i>
+          </div>
+        </sc-for>
+      </div>
+
+      <h6 style="margin-bottom:14px">verified sources</h6>
+      <div style="display:flex;flex-direction:column;margin-bottom:36px">
+        <sc-for list="{{ sourcesList }}" as="src" hint-placeholder-count="4">
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--color-divider)">
+            <i class="ph-fill ph-check-circle" style="color:oklch(75% 0.17 150);font-size:15px;flex:none"></i>
+            <div style="flex:1;font-size:14px">{{ src.title }}</div>
+            <div class="text-muted" style="font-size:12px;text-transform:capitalize;white-space:nowrap">{{ src.type }} · {{ src.date }}</div>
+          </div>
+        </sc-for>
+      </div>
+
+      <h6 style="margin-bottom:14px">export</h6>
+      <div class="card" style="flex-direction:row;align-items:center;justify-content:space-between;padding:16px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="ph ph-lock-simple" style="font-size:18px;color:var(--color-neutral-500)"></i>
+          <div>
+            <div style="font-size:14px">Audio/video export — locked</div>
+            <div class="text-muted" style="font-size:11px">Always-paid feature. Mocked in this prototype — no real charge.</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary" style="font-size:13px">Unlock (mock)</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+    <div class="sp-page sp-fade-in">
+      <button class="btn btn-ghost" style="font-size:13px;margin-bottom:18px" onClick="{{ backToPaper }}"><i class="ph ph-arrow-left"></i>&nbsp;back to scene paper</button>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <span style="font-family:var(--font-heading);font-size:13px;color:var(--color-neutral-500)">scene {{ currentScene.scene_number }}</span>
+        <span class="tag" style="{{ currentScenePaceStyle }}">{{ currentScene.pacing_tag }}</span>
+        <span style="font-family:var(--font-heading);font-size:13px;color:var(--color-neutral-400)">{{ currentScene.time_range }}</span>
+      </div>
+      <h2 style="font-size:28px;margin-bottom:20px">{{ currentScene.title }}</h2>
+
+      <div class="card" style="flex-direction:row;align-items:center;gap:14px;padding:10px 14px;margin-bottom:28px">
+        <button class="btn btn-icon btn-primary" onClick="{{ toggleSceneAudio }}"><i class="{{ sceneAudioIconClass }}"></i></button>
+        <div style="flex:1;height:4px;border-radius:2px;background:var(--color-neutral-800)"></div>
+        <div class="text-muted" style="font-size:12px">{{ currentScene.time_range }}</div>
+      </div>
+
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px">
+        <h6 style="margin:0">script</h6>
+        <div class="text-muted" style="font-size:12px">{{ currentScene.lineCount }} lines · {{ currentScene.speakerCount }} speaker(s)</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:0;margin-bottom:40px">
+        <sc-for list="{{ currentScene.lines }}" as="ln" hint-placeholder-count="3">
+          <div style="padding:18px 20px;margin-bottom:12px;border-radius:var(--radius-md)" style="{{ ln.wrapStyle }}">
+            <div style="font-family:var(--font-heading);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:6px">{{ ln.speaker }}</div>
+            <div style="font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:1.6;margin-bottom:12px">{{ ln.line }}</div>
+            <div style="display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--color-neutral-400);line-height:1.6">
+              <i class="ph ph-note-pencil" style="font-size:14px;margin-top:2px;flex:none"></i>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px">
+                <sc-for list="{{ ln.directionSegments }}" as="seg" hint-placeholder-count="1">
+                  <sc-if value="{{ seg.isPause }}" hint-placeholder-val="{{ false }}">
+                    <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;background:var(--color-accent-900);color:var(--color-accent-200);padding:2px 7px;border-radius:5px">{{ seg.value }}</span>
+                  </sc-if>
+                  <sc-if value="{{ seg.isText }}" hint-placeholder-val="{{ true }}">
+                    <span>{{ seg.value }}</span>
+                  </sc-if>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <h6 style="margin-bottom:14px">claims in this scene</h6>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:40px">
+        <sc-for list="{{ currentScene.claims }}" as="cl" hint-placeholder-count="2">
+          <div style="padding:12px 14px;border-radius:var(--radius-md)" style="{{ cl.wrapStyle }}">
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">
+              <i class="{{ cl.iconClass }}" style="{{ cl.iconColor }};font-size:14px"></i>
+              <span style="font-size:11px;letter-spacing:0.05em;text-transform:uppercase" style="{{ cl.iconColor }}">{{ cl.kindLabel }}</span>
+            </div>
+            <div style="font-size:14px;margin-bottom:4px" style="{{ cl.textStyle }}">{{ cl.text }}</div>
+            <div class="text-muted" style="font-size:12px">{{ cl.sourceLabel }}</div>
+          </div>
+        </sc-for>
+      </div>
+
+      <h6 style="margin-bottom:14px">scene image</h6>
+      <div style="display:flex;gap:14px;align-items:center;padding:16px;border:1px dashed var(--color-divider);border-radius:var(--radius-md);margin-bottom:36px">
+        <div style="width:88px;height:64px;border-radius:var(--radius-sm);background:var(--color-surface);display:flex;align-items:center;justify-content:center;flex:none">
+          <i class="ph ph-image" style="font-size:22px;color:var(--color-neutral-600)"></i>
+        </div>
+        <div style="flex:1">
+          <div style="font-size:13px;color:var(--color-neutral-400)">Image not yet generated — matching pipeline pending</div>
+          <div class="text-muted" style="font-size:11px">Honestly reflects the current build status</div>
+        </div>
+        <button class="btn btn-secondary" disabled="{{ true }}" style="font-size:12px">Swap</button>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;padding-top:12px;border-top:1px solid var(--color-divider)">
+        <button class="btn btn-secondary" disabled="{{ sceneIsFirst }}" onClick="{{ prevScene }}"><i class="ph ph-arrow-left"></i>&nbsp;previous scene</button>
+        <button class="btn btn-secondary" disabled="{{ sceneIsLast }}" onClick="{{ nextScene }}">next scene&nbsp;<i class="ph ph-arrow-right"></i></button>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    screen: 'input',
+    topicInput: '',
+    selectedCandidateId: null,
+    progressStepIndex: -1,
+    hookIndex: 0,
+    sceneIndex: null,
+    audioPlaying: false,
+    sceneAudioPlaying: false,
+  };
+
+  chipsData = ['Snapchat', 'an underdog comeback', 'Nokia', 'a founder who almost gave up'];
+  recentData = ['a founder who almost gave up', "Nokia's fall", 'the Blockbuster deal Netflix pitched'];
+
+  candidatesData = [
+    { id: 'c1', one_liner: "Snapchat's 23-year-old founder turned down a $3 billion all-cash offer — and said, on the record, why he thought that number was too low.", score: 8, tag: 'well-documented', flags: [], source_count: 4, angle_type: 'vindication', era: '2013' },
+    { id: 'c2', one_liner: 'The board members who quietly pushed Spiegel to take the deal — a disagreement that almost never became public.', score: 6, tag: 'credible, less-covered', flags: ['single source only'], source_count: 2, angle_type: 'cautionary', era: '2013' },
+    { id: 'c3', one_liner: 'How a two-year-old startup with no revenue talked its way out of the easiest exit in Silicon Valley history.', score: 7, tag: 'solid secondary sourcing', flags: [], source_count: 3, angle_type: 'untold', era: '2013' },
+  ];
+  suppressedData = [
+    { one_liner: "A leaked call transcript where Zuckerberg allegedly \"begged\" Spiegel to reconsider.", suppression_reason: 'Traces to an AI-generated content-farm article with no verifiable original source; contradicts primary reporting on the timeline. Shown for transparency — suppressions are never hidden silently.' },
+  ];
+
+  progressStepsData = [
+    { key: 'search', label: 'Searching sources' },
+    { key: 'verify', label: 'Verifying claims' },
+    { key: 'structure', label: 'Structuring the scene paper' },
+    { key: 'voice', label: 'Generating voiceover' },
+    { key: 'images', label: 'Matching images' },
+  ];
+
+  paperData = {
+    paper_number: '014', category: 'vindication',
+    title: 'The $3 Billion No',
+    dek: "In 2013, Facebook offered Snapchat's 23-year-old founder three billion dollars in cash. He turned it down — and said exactly why.",
+    verification_score: 8, verification_tag: 'well-documented', source_count: 4,
+    runtime: '0:58', hook_window: '0–3s', peak_tension: '25–38s', payoff: '48–56s',
+    hooks: [
+      { label: 'Hook A', type: 'curiosity gap', text: "A 23-year-old turned down three billion dollars in cash. The reason wasn't ego — it was math.", best_for_note: 'Best for viewers who respond to numbers and contrarian framing.' },
+      { label: 'Hook B', type: 'cold open', text: 'Mark Zuckerberg picked up the phone and offered three billion dollars. The answer was no.', best_for_note: 'Best for viewers who respond to direct, high-stakes openings.' },
+    ],
+    scenes: [
+      { scene_number: 1, title: 'The Offer', time_range: '0–10s', pacing_tag: 'WARM',
+        lines: [
+          { speaker: 'SPEAKER', line: "November, 2013. Snapchat is two years old, has no revenue, and twenty-three-year-old Evan Spiegel is running it out of his dad's living room. Then Facebook calls.", direction: "Warm, matter-of-fact narration. [pause 0.6s] before 'Then Facebook calls' — let the contrast land without pushing it." },
+          { speaker: 'SPEAKER', line: 'The offer: three billion dollars. All cash.', direction: "Slow down on 'three billion dollars.' Let the number breathe." },
+        ],
+        claims: [
+          { verified: true, text: 'Facebook offered Snapchat $3 billion in an all-cash acquisition bid in November 2013.', sourceLabel: 'Wall Street Journal, Nov 2013' },
+          { verified: false, text: "Spiegel was running the company out of his father's living room.", sourceLabel: 'Widely repeated anecdote — not independently verified for this exact period' },
+        ] },
+      { scene_number: 2, title: 'The Pressure', time_range: '10–25s', pacing_tag: 'BUILD',
+        lines: [
+          { speaker: 'SPEAKER', line: "Spiegel's own investors think he's lost his mind.", direction: 'This is narrative framing, not a quote — deliver it as color, not fact. Building energy.' },
+          { speaker: 'SPEAKER_1', line: '"Take the deal. You will never see this number again."', direction: 'Distinct voice — read as a paraphrased investor line, not Spiegel. Faster, more clipped.' },
+          { speaker: 'SPEAKER', line: "The board meets. Twice. Spiegel doesn't move.", direction: "Clip the pace here — short sentences, quick cuts. [pause 0.5s] before 'Spiegel doesn't move.'" },
+        ],
+        claims: [
+          { verified: false, text: "His own investors thought he'd lost his mind.", sourceLabel: 'Narrative characterization, not a sourced quote' },
+          { verified: true, text: 'The Snapchat board discussed the offer over multiple meetings before Spiegel declined.', sourceLabel: 'TechCrunch, Dec 2013' },
+        ] },
+      { scene_number: 3, title: 'The Decision', time_range: '25–38s', pacing_tag: 'FAST',
+        lines: [
+          { speaker: 'SPEAKER', line: "Spiegel's answer, on the record to the Wall Street Journal a year later: \"we thought the app could be worth a lot more than that.\"", direction: "This is the pivot — pick up pace noticeably. [pause 0.3s] before the quote. Emphasize 'a lot more.'" },
+          { speaker: 'SPEAKER', line: 'Not bravado. A bet on a number nobody else believed yet.', direction: "Fast but controlled. Land 'nobody else believed yet' with weight." },
+        ],
+        claims: [
+          { verified: true, text: 'Spiegel told the Wall Street Journal in 2014: "we thought the app could be worth a lot more than that."', sourceLabel: 'Wall Street Journal, Jan 2014' },
+        ] },
+      { scene_number: 4, title: 'The Vindication', time_range: '38–56s', pacing_tag: 'SLOW',
+        lines: [
+          { speaker: 'SPEAKER', line: 'Four years later, Snapchat went public. Its valuation that day: over twenty-four billion dollars.', direction: "Slow down completely. [pause 0.6s] before the valuation — this is the payoff, give the number room." },
+          { speaker: 'SPEAKER', line: 'Eight times the offer he turned down.', direction: 'Sincere, warm close. Direct eye line. No pause needed — let it land plain.' },
+        ],
+        claims: [
+          { verified: true, text: "Snap Inc. IPO'd in March 2017 with an opening-day valuation of about $24 billion.", sourceLabel: 'Reuters, Mar 2017' },
+        ] },
+    ],
+    sources: [
+      { title: "Facebook's $3 billion offer for Snapchat, reported at the time", type: 'news', date: 'Nov 2013' },
+      { title: "Follow-up interview: Snapchat board's internal discussions", type: 'interview', date: 'Dec 2013' },
+      { title: "Spiegel's own account, one year later", type: 'news', date: 'Jan 2014' },
+      { title: 'Snap Inc. IPO valuation reporting', type: 'news', date: 'Mar 2017' },
+    ],
+  };
+
+  paceColors = {
+    FAST: 'background:oklch(26% 0.10 25);color:oklch(82% 0.17 25)',
+    BUILD: 'background:oklch(28% 0.09 70);color:oklch(84% 0.15 70)',
+    SLOW: 'background:var(--color-accent-800);color:var(--color-accent-100)',
+    WARM: 'background:oklch(26% 0.09 150);color:oklch(80% 0.15 150)',
+  };
+
+  scoreColorStyle(score) {
+    if (score >= 7) return 'color:oklch(75% 0.17 150)';
+    if (score >= 4) return 'color:oklch(80% 0.15 70)';
+    return 'color:oklch(70% 0.19 25)';
+  }
+  scoreTagStyle(score) {
+    if (score >= 7) return 'background:oklch(25% 0.08 150);color:oklch(82% 0.15 150)';
+    if (score >= 4) return 'background:oklch(26% 0.08 70);color:oklch(85% 0.14 70)';
+    return 'background:oklch(24% 0.09 25);color:oklch(83% 0.17 25)';
+  }
+
+  parseDirection(text) {
+    const parts = text.split(/(\[pause[^\]]*\])/g).filter((s) => s.length > 0);
+    return parts.map((p) => (p.startsWith('[pause') ? { isPause: true, isText: false, value: p } : { isPause: false, isText: true, value: p }));
+  }
+
+  submitTopic = () => { this.setState({ screen: 'candidates', topicInput: this.state.topicInput || 'Snapchat' }); };
+  onTopicChange = (e) => this.setState({ topicInput: e.target.value });
+  onTopicKeyDown = (e) => { if (e.key === 'Enter') this.submitTopic(); };
+  useChip = (label) => this.setState({ topicInput: label });
+  editTopic = () => this.setState({ screen: 'input' });
+  backToCandidates = () => this.setState({ screen: 'candidates', selectedCandidateId: null });
+  backToPaper = () => this.setState({ screen: 'paper', sceneIndex: null });
+
+  pickCandidate = (id) => {
+    this.setState({ selectedCandidateId: id, screen: 'progress', progressStepIndex: 0 });
+    this.runProgress();
+  };
+  runProgress() {
+    const total = this.progressStepsData.length;
+    let i = 1;
+    const tick = () => {
+      if (i > total) { setTimeout(() => this.setState({ screen: 'paper' }), 350); return; }
+      this.setState({ progressStepIndex: i });
+      i++;
+      setTimeout(tick, 600);
+    };
+    setTimeout(tick, 500);
+  }
+
+  selectHook = (i) => this.setState({ hookIndex: i });
+  openScene = (i) => this.setState({ screen: 'detail', sceneIndex: i, sceneAudioPlaying: false });
+  nextScene = () => this.setState((s) => ({ sceneIndex: Math.min(s.sceneIndex + 1, this.paperData.scenes.length - 1) }));
+  prevScene = () => this.setState((s) => ({ sceneIndex: Math.max(s.sceneIndex - 1, 0) }));
+  toggleAudio = () => this.setState((s) => ({ audioPlaying: !s.audioPlaying }));
+  toggleSceneAudio = () => this.setState((s) => ({ sceneAudioPlaying: !s.sceneAudioPlaying }));
+
+  renderVals() {
+    const { screen, topicInput, selectedCandidateId, progressStepIndex, hookIndex, sceneIndex, audioPlaying, sceneAudioPlaying } = this.state;
+    const paper = this.paperData;
+    const selected = this.candidatesData.find((c) => c.id === selectedCandidateId);
+
+    const progressSteps = this.progressStepsData.map((s, i) => {
+      const status = i < progressStepIndex ? 'complete' : i === progressStepIndex ? 'active' : 'pending';
+      const iconClass = status === 'complete' ? 'ph-fill ph-check-circle' : status === 'active' ? 'ph ph-circle-notch' : 'ph ph-circle-dashed';
+      const iconWrapStyle = status === 'complete' ? 'background:var(--color-accent-800);color:var(--color-accent-200)' : status === 'active' ? 'background:var(--color-accent-900);color:var(--color-accent)' : 'background:var(--color-surface);color:var(--color-neutral-600)';
+      const textStyle = status === 'pending' ? 'color:var(--color-neutral-500)' : 'color:var(--color-text)';
+      return { ...s, iconClass, iconWrapStyle, textStyle };
+    });
+
+    const candidateCards = this.candidatesData.map((c) => ({
+      ...c,
+      scoreColor: this.scoreColorStyle(c.score),
+      tagStyle: this.scoreTagStyle(c.score),
+      hasFlags: c.flags.length > 0,
+      pick: () => this.pickCandidate(c.id),
+    }));
+
+    const currentScene = sceneIndex != null ? paper.scenes[sceneIndex] : null;
+    let currentSceneOut = null;
+    if (currentScene) {
+      const speakers = new Set(currentScene.lines.map((l) => l.speaker));
+      currentSceneOut = {
+        ...currentScene,
+        lineCount: currentScene.lines.length,
+        speakerCount: speakers.size,
+        lines: currentScene.lines.map((l) => ({
+          ...l,
+          directionSegments: this.parseDirection(l.direction),
+          wrapStyle: l.speaker === 'SPEAKER' ? 'background:var(--color-surface)' : 'background:var(--color-accent-900);border-left:3px solid var(--color-accent)',
+        })),
+        claims: currentScene.claims.map((cl) => ({
+          ...cl,
+          kindLabel: cl.verified ? 'verified fact' : 'narrative framing',
+          iconClass: cl.verified ? 'ph-fill ph-check-circle' : 'ph ph-quotes',
+          iconColor: cl.verified ? 'color:oklch(75% 0.17 150)' : 'color:var(--color-neutral-500)',
+          textStyle: cl.verified ? '' : 'font-style:italic;color:var(--color-neutral-300)',
+          wrapStyle: cl.verified ? 'background:var(--color-surface)' : 'background:transparent;border:1px dashed var(--color-divider)',
+          sourceLabel: cl.verified ? cl.sourceLabel : 'Not a sourced claim — ' + cl.sourceLabel,
+        })),
+      };
+    }
+
+    return {
+      isInput: screen === 'input', isCandidates: screen === 'candidates', isProgress: screen === 'progress', isPaper: screen === 'paper', isDetail: screen === 'detail',
+      topicInput,
+      chips: this.chipsData.map((label) => ({ label, pick: () => this.useChip(label) })),
+      recentSearches: this.recentData.map((label) => ({ label, pick: () => { this.setState({ topicInput: label, screen: 'candidates' }); } })),
+      submitTopic: this.submitTopic, onTopicChange: this.onTopicChange, onTopicKeyDown: this.onTopicKeyDown,
+      editTopic: this.editTopic, backToCandidates: this.backToCandidates, backToPaper: this.backToPaper,
+      resultContextLine: 'These are three framings of the same event — not three different stories.',
+      candidateCards,
+      suppressedCards: this.suppressedData,
+      selectedOneLiner: selected ? selected.one_liner : '',
+      progressSteps,
+      paper,
+      paperScoreTagStyle: this.scoreTagStyle(paper.verification_score),
+      audioIconClass: audioPlaying ? 'ph-fill ph-pause' : 'ph-fill ph-play',
+      audioProgressStyle: 'position:absolute;inset:0;width:' + (audioPlaying ? '38%' : '0%') + ';background:var(--color-accent);border-radius:2px;transition:width .3s',
+      audioTimeLabel: audioPlaying ? '0:22 / 0:58' : '0:00 / 0:58',
+      hooks: paper.hooks.map((h, i) => ({
+        ...h, selected: i === hookIndex,
+        cardStyle: i === hookIndex ? 'box-shadow:inset 0 0 0 1.5px var(--color-accent)' : 'box-shadow:var(--shadow-sm)',
+        select: () => this.selectHook(i),
+      })),
+      timingTiles: [
+        { label: 'runtime', value: paper.runtime },
+        { label: 'hook window', value: paper.hook_window },
+        { label: 'peak tension', value: paper.peak_tension },
+        { label: 'payoff', value: paper.payoff },
+      ],
+      scenesList: paper.scenes.map((sc, i) => ({ ...sc, paceChipStyle: this.paceColors[sc.pacing_tag], open: () => this.openScene(i) })),
+      sourcesList: paper.sources,
+      currentScene: currentSceneOut,
+      currentScenePaceStyle: currentSceneOut ? this.paceColors[currentSceneOut.pacing_tag] : '',
+      sceneIsFirst: sceneIndex === 0,
+      sceneIsLast: sceneIndex === paper.scenes.length - 1,
+      nextScene: this.nextScene, prevScene: this.prevScene,
+      toggleAudio: this.toggleAudio, toggleSceneAudio: this.toggleSceneAudio,
+      sceneAudioIconClass: sceneAudioPlaying ? 'ph-fill ph-pause' : 'ph-fill ph-play',
+    };
+  }
+}
+
+</script>
+</body>
+</html>
