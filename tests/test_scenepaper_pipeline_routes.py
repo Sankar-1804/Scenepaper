@@ -246,6 +246,18 @@ def response_json(resp):
 def run_pipeline_route_tests():
     print("\n--- functions/scenepaper_pipeline (Advanced I/O) routing ---")
 
+    # Catalyst rejects job_name longer than 20 chars with INVALID_INPUT,
+    # failing the ENTIRE job submission. This is invisible in the SDK (it
+    # just POSTs whatever it is given) and cost a live 502 to find, so it is
+    # pinned here rather than left to be rediscovered.
+    import uuid as _uuid
+    _sample = f"sp_gen_{_uuid.uuid4().hex[:10]}"
+    check(
+        "generated job_name fits Catalyst's 20-char cap",
+        len(_sample) <= 20,
+        f"{_sample!r} is {len(_sample)} chars",
+    )
+
     resp = pipeline_main.handler(FakeRequest("GET", "/"))
     check("GET / returns 200", response_status(resp) == 200)
 

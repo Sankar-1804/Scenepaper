@@ -167,7 +167,7 @@ def _stub_run_ideation_search(topic: str) -> list:
 # Job submission -- Create_Immediate_Job pattern (issue #8 / issue #2)
 # --------------------------------------------------------------------------
 
-def _submit_pipeline_job(job_params: dict) -> dict:
+def _submit_pipeline_job(job_params: dict, request: Request = None) -> dict:
     """
     Submit the long-running pipeline (search -> verify -> structure -> TTS
     -> images -> NoSQL write) as an immediate Job targeting the
@@ -203,9 +203,19 @@ def _submit_pipeline_job(job_params: dict) -> dict:
             "(HIL provisioning step, see issue #8)."
         )
 
-    app = zcatalyst_sdk.initialize()
+    # The incoming request MUST be handed to the SDK: initialize() calls
+    # parse_headers_from_request(req), which is how the admin credentials for
+    # this invocation get established. Called bare (no req), the SDK has no
+    # credentials and every job submission fails -- which surfaced only as a
+    # generic 502, since the failure happens inside the SDK's HTTP layer.
+    app = zcatalyst_sdk.initialize(req=request)
     job_meta = {
-        "job_name": f"scenepaper_generate_{uuid.uuid4().hex[:10]}",
+        # Catalyst caps job_name at 20 chars and rejects the whole submission
+        # with INVALID_INPUT past that -- verified live against the API, and
+        # it is what made every POST /generate fail with a 502. The previous
+        # value ("scenepaper_generate_" + 10 hex) was 30 chars.
+        # "sp_gen_" (7) + 10 hex = 17, which leaves headroom.
+        "job_name": f"sp_gen_{uuid.uuid4().hex[:10]}",
         "jobpool_id": jobpool_id,
         "jobpool_name": jobpool_name,
         "target_type": "Function",
@@ -215,7 +225,10 @@ def _submit_pipeline_job(job_params: dict) -> dict:
         # (e.g. the chosen candidate) are JSON-encoded.
         "params": {key: str(value) for key, value in job_params.items()},
     }
-    return app.job_scheduling().job().submit_job(job_meta)
+    # `.job` is a @property returning a Job instance -- NOT a method. Calling
+    # it (`.job()`) raises "TypeError: 'Job' object is not callable".
+    # `job_scheduling()` IS a method, hence the asymmetry.
+    return app.job_scheduling().job.submit_job(job_meta)
 
 
 # --------------------------------------------------------------------------
@@ -261,13 +274,19 @@ def _handle_generate(request: Request):
     }
 
     try:
-        job_result = _submit_pipeline_job(job_params)
+        job_result = _submit_pipeline_job(job_params, request)
     except RuntimeError as exc:
         logger.error("Pipeline job not submitted: %s", exc)
         return _error(503, str(exc))
-    except Exception:  # pragma: no cover - defensive, real SDK/network errors
+    except Exception as exc:  # pragma: no cover - real SDK/network errors
+        # Include the actual exception text in BOTH the log and the response.
+        # A bare "Failed to submit pipeline job" 502 hid two real, quite
+        # different bugs (a 20-char job_name cap, and the SDK being
+        # initialized without the request) and cost a deploy cycle each to
+        # diagnose. This is a dev-environment service with no auth in front
+        # of it, so there is nothing secret to leak here.
         logger.exception("Failed to submit pipeline job")
-        return _error(502, "Failed to submit pipeline job")
+        return _error(502, f"Failed to submit pipeline job: {type(exc).__name__}: {exc}")
 
     job_id = job_result.get("job_id") if isinstance(job_result, dict) else None
     return _json_response(
