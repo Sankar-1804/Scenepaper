@@ -41,6 +41,7 @@ import logging
 import os
 import re
 import uuid
+from decimal import Decimal
 
 from flask import Request, jsonify, make_response
 import zcatalyst_sdk
@@ -50,6 +51,39 @@ from zcatalyst_sdk.nosql.types import TypeSerializer as _NoSqlTypeSerializer
 logger = logging.getLogger()
 
 _PAPER_ID_RE = re.compile(r"^/paper/([^/]+)/?$")
+
+
+def _normalize_nosql_item(obj):
+    """Convert DynamoDB-deserialized types to JSON-safe Python.
+
+    Two round-trip degradations confirmed against the live Catalyst NoSQL
+    backend (paper 9da2d576, 2026-08-09):
+
+    1. N type → TypeDeserializer returns Decimal. Flask 2.2.x's _default
+       converts Decimal to str(Decimal), so 8.5 appears in the JSON response
+       as the string "8.5". Fix: convert Decimal to float.
+
+    2. BOOL type → Catalyst may return the type-tag value as the JSON string
+       "true" / "false" rather than a JSON boolean (i.e. {"BOOL": "true"}
+       instead of {"BOOL": true}). TypeDeserializer.deserialize_bool returns
+       whatever value it receives unchanged, so the Python string "true" flows
+       into the response and JavaScript's Boolean("false") === true fires,
+       rendering every verified-false span as sourced fact. Fix: convert the
+       strings "true"/"false" to Python bool. The ScenePaper schema has no
+       string field whose legitimate value is either of these words, so the
+       normalisation is unambiguous.
+    """
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: _normalize_nosql_item(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_nosql_item(v) for v in obj]
+    if obj == "true":
+        return True
+    if obj == "false":
+        return False
+    return obj
 
 # Config this function needs at runtime, seeded into Catalyst Cache because
 # Catalyst Functions have NO platform-level environment variables (confirmed
@@ -153,7 +187,7 @@ def _get_scenepaper(paper_id: str):
     items = result.get or []
     if not items:
         return None
-    return items[0].get('item')
+    return _normalize_nosql_item(items[0].get('item'))
 
 
 def _update_scenepaper(paper_id: str, updates: dict):

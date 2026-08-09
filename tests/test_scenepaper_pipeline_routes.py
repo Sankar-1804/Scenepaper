@@ -511,6 +511,131 @@ def run_job_function_tests():
     job_main.handler(job_request, ctx)
     check("Job function closes with failure on invalid candidate JSON", ctx.closed_with == "failure")
 
+    # ------------------------------------------------------------------
+    # Round-trip type checks -- write via job function, read via GET handler,
+    # assert the JSON response carries bool and number (not string "true"/"8.5").
+    #
+    # Two degradations confirmed against live Catalyst NoSQL (paper 9da2d576):
+    #   - Decimal("8.5") → Flask._default → str "8.5"  (N type / number fields)
+    #   - {"BOOL": "true"} from Catalyst API → TypeDeserializer passes string
+    #     through unchanged → JavaScript Boolean("false") === true
+    # Both are fixed by _normalize_nosql_item in _get_scenepaper.
+    # ------------------------------------------------------------------
+    _rt_paper_id = "roundtrip-type-test"
+    _orig_gen = job_main.generate_scene_paper
+
+    def _gen_with_typed_fields(topic, candidate, **kw):
+        return {
+            "title": "[fake] type round-trip",
+            "category": "curious",
+            "dek": "fake",
+            "verification_status": "unverified",
+            "hooks": [
+                {
+                    "label": "H1",
+                    "type": "direct",
+                    "text": [
+                        {"text": "Sourced claim.", "verified": True},
+                        {"text": " Dramatized color.", "verified": False},
+                    ],
+                }
+            ],
+            "scenes": [],
+            "delivery_notes": [],
+            "sources": [
+                {
+                    "title": "Test source",
+                    "type": "web",
+                    "tag": "solid",
+                    "confidence_score": 7.5,   # float -> Decimal("7.5") after _floats_to_decimal
+                    "verified": True,
+                    "suppressed": False,
+                    "flags": [],
+                }
+            ],
+            "cta_text": "",
+            "profile_warnings": [],
+            "profile_dropped_sections": [],
+            "profile_truncated_fields": {},
+        }
+
+    job_main.generate_scene_paper = _gen_with_typed_fields
+    ctx = FakeContext()
+    job_main.handler(
+        FakeJobRequest({
+            "paper_id": _rt_paper_id,
+            "topic": "type test",
+            "candidate": json.dumps({"one_liner": "x"}),
+            "user_id": "",
+        }),
+        ctx,
+    )
+    job_main.generate_scene_paper = _orig_gen
+
+    check(
+        "Round-trip: job succeeds",
+        ctx.closed_with == "success",
+        f"closed_with={ctx.closed_with!r}",
+    )
+
+    resp = pipeline_main.handler(FakeRequest("GET", "/paper", args={"id": _rt_paper_id}))
+    check("Round-trip: GET /paper returns 200", response_status(resp) == 200)
+    body = response_json(resp)
+    paper = body.get("paper", {})
+
+    hook_span_0 = (paper.get("hooks") or [{}])[0].get("text", [{}])[0]
+    hook_span_1 = (paper.get("hooks") or [{}])[0].get("text", [{}, {}])[1]
+    src = (paper.get("sources") or [{}])[0]
+
+    check(
+        "Round-trip: hooks[0].text[0].verified is bool True (not str 'true')",
+        hook_span_0.get("verified") is True,
+        f"got {type(hook_span_0.get('verified')).__name__!r}: {hook_span_0.get('verified')!r}",
+    )
+    check(
+        "Round-trip: hooks[0].text[1].verified is bool False (not str 'false')",
+        hook_span_1.get("verified") is False,
+        f"got {type(hook_span_1.get('verified')).__name__!r}: {hook_span_1.get('verified')!r}",
+    )
+    check(
+        "Round-trip: sources[0].verified is bool True",
+        src.get("verified") is True,
+        f"got {type(src.get('verified')).__name__!r}: {src.get('verified')!r}",
+    )
+    check(
+        "Round-trip: sources[0].confidence_score is a number (not str '7.5')",
+        isinstance(src.get("confidence_score"), (int, float)),
+        f"got {type(src.get('confidence_score')).__name__!r}: {src.get('confidence_score')!r}",
+    )
+
+    # Simulate the live Catalyst BOOL quirk: the API may return {"BOOL": "true"}
+    # (JSON string, not JSON boolean) -- TypeDeserializer passes it through as
+    # the Python string "true". Plant that string directly in the fake store so
+    # we can verify _normalize_nosql_item corrects it without a live API call.
+    _fake_sdk._store["bool-quirk-sim"] = {
+        "id": "bool-quirk-sim",
+        "hooks": [{"label": "H", "text": [
+            {"text": "A claim", "verified": "true"},   # string, not bool
+            {"text": " Color", "verified": "false"},
+        ]}],
+        "sources": [{"title": "S", "type": "web", "verified": "false"}],
+    }
+    resp = pipeline_main.handler(FakeRequest("GET", "/paper", args={"id": "bool-quirk-sim"}))
+    body = response_json(resp)
+    paper = body.get("paper", {})
+    qs0 = (paper.get("hooks") or [{}])[0].get("text", [{}])[0]
+    qs1 = (paper.get("hooks") or [{}])[0].get("text", [{}, {}])[1]
+    check(
+        "Catalyst BOOL quirk: str 'true' normalized to bool True in GET response",
+        qs0.get("verified") is True,
+        f"got {type(qs0.get('verified')).__name__!r}: {qs0.get('verified')!r}",
+    )
+    check(
+        "Catalyst BOOL quirk: str 'false' normalized to bool False in GET response",
+        qs1.get("verified") is False,
+        f"got {type(qs1.get('verified')).__name__!r}: {qs1.get('verified')!r}",
+    )
+
 
 if __name__ == "__main__":
     # main.py's jsonify()/make_response() need a Flask application context
