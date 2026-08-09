@@ -438,6 +438,58 @@ def run_job_function_tests():
         written,
     )
 
+    # sources[].confidence_score arrives as a float from Call A (VerificationResult).
+    # TypeSerializer raises on floats -- _floats_to_decimal() must convert them
+    # to Decimal before to_nosql(). This is the exact failure that blocked the
+    # first live end-to-end run (38.5s job that wrote nothing).
+    float_paper_id = "job-test-paper-float"
+    _original_gen = job_main.generate_scene_paper
+
+    def _gen_with_float(topic, candidate, **kw):
+        return {
+            "title": f"[fake] {topic}",
+            "category": "curious",
+            "dek": "fake dek",
+            "verification_status": "unverified",
+            "hooks": [],
+            "scenes": [],
+            "delivery_notes": [],
+            "sources": [
+                {
+                    "title": "Test source",
+                    "confidence_score": 7.0,  # float -- triggers TypeError without Decimal fix
+                    "verified": True,
+                    "flags": [],
+                }
+            ],
+            "cta_text": "",
+            "profile_warnings": [],
+            "profile_dropped_sections": [],
+            "profile_truncated_fields": {},
+        }
+
+    job_main.generate_scene_paper = _gen_with_float
+    ctx = FakeContext()
+    job_main.handler(
+        FakeJobRequest({"paper_id": float_paper_id, "topic": "float test",
+                        "candidate": json.dumps({"one_liner": "x"}), "user_id": ""}),
+        ctx,
+    )
+    job_main.generate_scene_paper = _original_gen
+    check(
+        "Job with float confidence_score succeeds (Decimal conversion works)",
+        ctx.closed_with == "success",
+        f"closed_with={ctx.closed_with!r}",
+    )
+    from decimal import Decimal
+    written_float = _fake_sdk._store.get(float_paper_id)
+    check(
+        "sources[].confidence_score stored as Decimal after float conversion",
+        written_float is not None
+        and written_float.get("sources", [{}])[0].get("confidence_score") == Decimal("7.0"),
+        written_float,
+    )
+
     ctx = FakeContext()
     job_request = FakeJobRequest({"topic": "underdog comeback"})  # missing paper_id/candidate
     job_main.handler(job_request, ctx)

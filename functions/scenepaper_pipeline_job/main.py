@@ -26,6 +26,7 @@ functions/scenepaper_pipeline/main.py for the full encoding reference.
 import json
 import logging
 import os
+from decimal import Decimal
 
 import zcatalyst_sdk
 from zcatalyst_sdk.nosql.transfom import Item as _NoSqlItem
@@ -64,6 +65,22 @@ def _seed_api_keys_from_cache(app) -> None:
             "GEMINI_API_KEY not found in env or Catalyst Cache -- "
             "seed it via the Console: Cache > default segment > key=GEMINI_API_KEY"
         )
+
+
+def _floats_to_decimal(obj):
+    """Recursively convert float values to Decimal before DynamoDB encoding.
+
+    zcatalyst_sdk's TypeSerializer raises TypeError on floats -- Decimal is the
+    documented equivalent for NoSQL numbers. sources[].confidence_score (a float
+    from Call A's VerificationResult) is the real-world trigger.
+    """
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _floats_to_decimal(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_floats_to_decimal(item) for item in obj]
+    return obj
 
 
 def _build_candidate(candidate_dict: dict) -> Candidate:
@@ -149,7 +166,7 @@ def _stage_write_scenepaper(
             logger.info("profile parser audit (%s): %s", audit_key, dropped)
 
     table = zcatalyst_sdk.initialize().nosql().get_table("ScenePaper")
-    table.insert_items({"item": _NoSqlItem.to_nosql(doc)})
+    table.insert_items({"item": _NoSqlItem.to_nosql(_floats_to_decimal(doc))})
     logger.info("ScenePaper id=%s written to NoSQL", paper_id)
 
 
