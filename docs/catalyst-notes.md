@@ -51,6 +51,27 @@ Installed session 2 (`zcatalyst-cli` v1.27.0 via `npm install -g`), **logged in 
 
 Also connected this session: **the Zoho Catalyst MCP server** (150+ tools covering Data Store CRUD, Functions, Job Pools/Jobs, API Gateway, File Store, QuickML, and more) — used directly to inspect and modify the real project rather than requiring console clicks. Its one confirmed gap: no NoSQL-specific tools (see issue #1 above).
 
+## Operational risks and known issues (2026-08-10)
+
+### /ideate timing risk — NOT yet fixed
+Live measurement: `POST /ideate` takes **25.2 seconds** end-to-end against the Advanced I/O function's hard 30-second cap. That leaves under 5 seconds of headroom and the endpoint will intermittently time out.
+
+**Correct fix:** move ideation into its own Job function (same async-polling pattern as `/generate`), keeping the Advanced I/O front door well under 30s.  
+**Do not:** trim search quality or skip clustering steps to buy time — that would undermine the verification moat.  
+Do not attempt this during the current sprint unless everything else is done; tracked as a known risk.
+
+### SEARXNG_BASE_URL in Catalyst Cache is an ngrok tunnel URL
+The `SEARXNG_BASE_URL` key in the `ScenePaper` Cache segment currently holds an ngrok tunnel URL. ngrok tunnels die when the tunnel process stops or the session restarts. If `/ideate` starts failing with no apparent code change, this is the first thing to check — refresh the Cache value to the new tunnel URL.
+
+Long-term fix: self-host SearXNG at a stable URL (see Issue #21 / SearXNG hosting note in Service Mapping below).
+
+### Vendored backend/ sync coupling
+Both `functions/scenepaper_pipeline/backend/` and `functions/scenepaper_pipeline_job/backend/` are vendored copies of `scenepaper-api/src/backend/`. They must stay in sync manually — Catalyst function archives are self-contained zips, so they include their own copies of the shared code.
+
+As of 2026-08-10 the vendored copies are **ahead** of `scenepaper-api/src/backend/`: the 5xx transient retry logic in `gemini_client.py` and the full `ideation.py` exist in the vendored copies but have not yet landed on `scenepaper-api`'s `main`. Those changes need to be pushed to `scenepaper-api` or the vendored copy becomes the authoritative source, which is backwards.
+
+**Rule:** whenever a file under `functions/*/backend/` is changed, the corresponding file under `scenepaper-api/src/backend/` must be updated in the same commit (or in a same-session follow-up commit to `scenepaper-api`). Check for divergence before each new feature sprint.
+
 ## Service mapping (per CLAUDE.md, restated here for tracking)
 
 - **NoSQL** — the `ScenePaper` and `UserProfile` tables. Decided over Data Store, see above. Still needs direct console verification (issue #1) — neither the CLI nor the MCP expose it.
