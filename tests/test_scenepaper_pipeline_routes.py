@@ -59,6 +59,7 @@ standalone script above; the commands below are correct once serve works:
 import json
 import os
 import sys
+from zcatalyst_sdk.nosql.types import TypeDeserializer as _NoSqlTypeDeserializer
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -157,12 +158,16 @@ class _FakeNoSQLTable:
         self._store = store  # shared dict[id -> item]
 
     def insert_items(self, *args):
-        item = args[0]['item']
-        self._store[item['id']] = dict(item)
-        return _FakeNoSQLResponse('create', [{'item': dict(item)}])
+        # args[0]['item'] is DynamoDB-encoded; decode to Python before storing
+        encoded = args[0]['item']
+        item = _NoSqlTypeDeserializer().deserialize({'M': encoded})
+        self._store[item['id']] = item
+        return _FakeNoSQLResponse('create', [{'item': item}])
 
     def fetch_item(self, input_data):
-        paper_id = input_data['keys'][0]['id']
+        # key value is DynamoDB-encoded, e.g. {'S': paper_id}
+        raw_id = input_data['keys'][0]['id']
+        paper_id = _NoSqlTypeDeserializer().deserialize(raw_id)
         item = self._store.get(paper_id)
         if item is None:
             return _FakeNoSQLResponse('get', [])
@@ -170,18 +175,22 @@ class _FakeNoSQLTable:
 
     def update_items(self, *args):
         req = args[0]
-        paper_id = req['keys']['id']
+        raw_id = req['keys']['id']
+        paper_id = _NoSqlTypeDeserializer().deserialize(raw_id)
         update_attrs = req.get('update_attributes', [])
         item = self._store.get(paper_id)
         if item:
+            _deser = _NoSqlTypeDeserializer()
             for attr in update_attrs:
                 key = attr['attribute_path'][0] if attr.get('attribute_path') else None
                 if key and attr.get('operation_type') == 'PUT':
-                    item[key] = attr['update_value'].get('value')
+                    # update_value is DynamoDB-encoded; decode before storing
+                    item[key] = _deser.deserialize(attr['update_value'])
         return _FakeNoSQLResponse('update', [])
 
     def delete_items(self, *args):
-        paper_id = args[0]['keys']['id']
+        raw_id = args[0]['keys']['id']
+        paper_id = _NoSqlTypeDeserializer().deserialize(raw_id)
         self._store.pop(paper_id, None)
         return _FakeNoSQLResponse('delete', [])
 
@@ -344,27 +353,6 @@ def run_pipeline_route_tests():
     resp = pipeline_main.handler(FakeRequest("GET", "/nope"))
     check("GET /nope (unknown route) returns 404", response_status(resp) == 404)
 
-    # TEMPORARY probe route (work item 2) -- exercises the full CRUD cycle
-    # against the fake in-memory SDK; the live call is what determines the
-    # real update_value shape for non-scalar fields.
-    resp = pipeline_main.handler(FakeRequest("GET", "/probe-nosql"))
-    body = response_json(resp)
-    check("GET /probe-nosql returns 200 with probe results", response_status(resp) == 200)
-    check(
-        "probe insert+fetch cycle worked (fake SDK)",
-        isinstance(body.get("results", {}).get("fetch_after_insert"), dict),
-        body,
-    )
-    check(
-        "probe list-update stored correctly (fake SDK)",
-        body.get("results", {}).get("fetch_after_list_update", {}).get("list_field") == ["x", "y"],
-        body,
-    )
-    check(
-        "probe cleanup ran",
-        body.get("results", {}).get("cleanup") == "deleted",
-        body,
-    )
 
 
 def run_job_function_tests():

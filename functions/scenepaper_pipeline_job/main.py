@@ -103,16 +103,18 @@ def _stage_images(scene_paper: dict) -> list:
 
 def _stage_write_scenepaper(paper_id: str, scene_paper: dict, voiceover_url, image_set: list):
     """
-    TODO(issue #1): Write the finished ScenePaper document to the Catalyst
-    NoSQL table once the column-type question (native JSON vs.
-    json.dumps()'d text column for nested fields) is confirmed. Expected
-    shape once unblocked, called with app = zcatalyst_sdk.initialize():
-        table = app.datastore().table('ScenePaper')
-        table.insert_row({**scene_paper, 'id': paper_id, ...})
+    TODO(work item 1): Wire to the real orchestrator and write the finished
+    ScenePaper document to NoSQL once api-integration-agent lands
+    src/backend/orchestrator.py. Correct SDK surface (confirmed via live probe):
+        from zcatalyst_sdk.nosql.transfom import Item as _NoSqlItem
+        table = zcatalyst_sdk.initialize().nosql().get_table('ScenePaper')
+        doc = {**scene_paper, 'id': paper_id, 'voiceover_url': voiceover_url,
+               'image_set': image_set}
+        table.insert_items({'item': _NoSqlItem.to_nosql(doc)})
     Not implemented -- just logs what would have been written.
     """
     logger.info(
-        "STUB stage 5/5 (issue #1): write ScenePaper id=%s (scene_paper keys=%s, "
+        "STUB stage 5/5 (work item 1): write ScenePaper id=%s (scene_paper keys=%s, "
         "voiceover_url=%s, image_set_count=%d)",
         paper_id,
         list(scene_paper.keys()),

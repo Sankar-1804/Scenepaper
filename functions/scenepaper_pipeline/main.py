@@ -44,6 +44,8 @@ import uuid
 
 from flask import Request, jsonify, make_response
 import zcatalyst_sdk
+from zcatalyst_sdk.nosql.transfom import Item as _NoSqlItem
+from zcatalyst_sdk.nosql.types import TypeSerializer as _NoSqlTypeSerializer
 
 logger = logging.getLogger()
 
@@ -69,14 +71,24 @@ def _error(status_code: int, message: str):
 # and UserProfile (partition key: id). All nested fields are native JSON
 # documents -- no serialization step needed.
 #
-# SDK surface (zcatalyst_sdk.nosql, verified from installed package):
-#   table.insert_items({'item': {...}})        -> NoSqlResponse (.create list)
-#   table.fetch_item({'keys': [{'id': ...}]}) -> NoSqlResponse (.get list)
-#   table.update_items({'keys': ..., 'update_attributes': [...]})
-#   table.delete_items({'keys': {'id': ...}})
+# SDK surface (zcatalyst_sdk.nosql, confirmed live against the real table):
 #
-# NOTE: update_value shape {'value': v} is from the type stubs; verify with
-# one live call before trusting for non-scalar values (arrays, nested dicts).
+#   INSERT: item values must be DynamoDB-encoded via _NoSqlItem.to_nosql():
+#     table.insert_items({'item': _NoSqlItem.to_nosql(python_dict)})
+#     Raw Python dicts return INVALID_INPUT -- the API will not auto-encode.
+#
+#   FETCH:  key values must also be DynamoDB-encoded (confirmed live):
+#     result = table.fetch_item({'keys': [{'id': {'S': paper_id}}]})
+#     items[0].get('item') returns a deserialized Python dict.
+#
+#   UPDATE: both keys and update_value must be DynamoDB-encoded:
+#     _NoSqlTypeSerializer().serialize(v) -> {'S': str} / {'L': list} / {'M': dict}
+#     update_attributes: [{'operation_type': 'PUT', 'attribute_path': [k],
+#                          'update_value': _NoSqlTypeSerializer().serialize(v)}]
+#     keys: {'id': {'S': paper_id}}
+#
+#   DELETE: key values must also be DynamoDB-encoded:
+#     table.delete_items({'keys': {'id': {'S': paper_id}}})
 # --------------------------------------------------------------------------
 
 def _get_nosql_table(name: str):
@@ -86,14 +98,14 @@ def _get_nosql_table(name: str):
 def _create_scenepaper(payload: dict) -> dict:
     item = {'id': payload.get('id') or str(uuid.uuid4()), **payload}
     table = _get_nosql_table('ScenePaper')
-    table.insert_items({'item': item})
+    table.insert_items({'item': _NoSqlItem.to_nosql(item)})
     return item
 
 
 def _get_scenepaper(paper_id: str):
     table = _get_nosql_table('ScenePaper')
     try:
-        result = table.fetch_item({'keys': [{'id': paper_id}]})
+        result = table.fetch_item({'keys': [{'id': _NoSqlTypeSerializer().serialize(paper_id)}]})
     except Exception:
         # MUST log. A silent `return None` here makes a genuine NoSQL/network
         # failure indistinguishable from "no such paper" -- both surface as a
@@ -111,11 +123,12 @@ def _update_scenepaper(paper_id: str, updates: dict):
     if existing is None:
         return None
     table = _get_nosql_table('ScenePaper')
+    _ser = _NoSqlTypeSerializer()
     update_attrs = [
-        {'operation_type': 'PUT', 'attribute_path': [k], 'update_value': {'value': v}}
+        {'operation_type': 'PUT', 'attribute_path': [k], 'update_value': _ser.serialize(v)}
         for k, v in updates.items()
     ]
-    table.update_items({'keys': {'id': paper_id}, 'update_attributes': update_attrs})
+    table.update_items({'keys': {'id': _NoSqlTypeSerializer().serialize(paper_id)}, 'update_attributes': update_attrs})
     existing.update(updates)
     return existing
 
@@ -125,7 +138,7 @@ def _delete_scenepaper(paper_id: str) -> bool:
     if existing is None:
         return False
     table = _get_nosql_table('ScenePaper')
-    table.delete_items({'keys': {'id': paper_id}})
+    table.delete_items({'keys': {'id': _NoSqlTypeSerializer().serialize(paper_id)}})
     return True
 
 
@@ -233,58 +246,6 @@ def _submit_pipeline_job(job_params: dict, request: Request = None) -> dict:
     # it (`.job()`) raises "TypeError: 'Job' object is not callable".
     # `job_scheduling()` IS a method, hence the asymmetry.
     return app.job_scheduling().job.submit_job(job_meta)
-
-
-# --------------------------------------------------------------------------
-# NoSQL write probe -- TEMPORARY (work item 2 / plan.md)
-#
-# Hit GET /probe-nosql on the deployed function to verify the insert/update/
-# delete path works end-to-end against the real Catalyst NoSQL table.
-# Key question: does update_value: {'value': v} accept non-scalar Python
-# values (lists, dicts) or do they need DynamoDB-encoded types?
-# Remove this endpoint and its routing line once the answer is confirmed.
-# --------------------------------------------------------------------------
-
-def _handle_probe_nosql():
-    probe_id = "probe-" + uuid.uuid4().hex[:8]
-    results = {}
-    try:
-        probe_doc = {
-            'id': probe_id,
-            'title': 'probe-insert',
-            'category': 'curious',
-            'scalar_field': 'hello',
-            'list_field': ['a', 'b', 'c'],
-            'dict_field': {'nested_key': 'nested_val'},
-        }
-        _create_scenepaper(probe_doc)
-        results['insert'] = 'ok'
-
-        results['fetch_after_insert'] = _get_scenepaper(probe_id)
-
-        _update_scenepaper(probe_id, {'scalar_field': 'updated-scalar'})
-        results['fetch_after_scalar_update'] = _get_scenepaper(probe_id)
-
-        _update_scenepaper(probe_id, {'list_field': ['x', 'y']})
-        results['fetch_after_list_update'] = _get_scenepaper(probe_id)
-
-        _update_scenepaper(probe_id, {'dict_field': {'new_key': 'new_val'}})
-        results['fetch_after_dict_update'] = _get_scenepaper(probe_id)
-
-    except Exception as exc:
-        results['error'] = f"{type(exc).__name__}: {exc}"
-    finally:
-        try:
-            _delete_scenepaper(probe_id)
-            results['cleanup'] = 'deleted'
-        except Exception as exc:
-            results['cleanup'] = f"failed: {exc}"
-
-    return _json_response(200, {
-        'status': 'probe',
-        'probe_id': probe_id,
-        'results': results,
-    })
 
 
 # --------------------------------------------------------------------------
@@ -427,9 +388,6 @@ def handler(request: Request):
 
     if path == "/ideate" and method == "POST":
         return _handle_ideate(request)
-
-    if path == "/probe-nosql" and method == "GET":  # TEMPORARY -- remove after work item 2
-        return _handle_probe_nosql()
 
     if path == "/generate" and method == "POST":
         return _handle_generate(request)
