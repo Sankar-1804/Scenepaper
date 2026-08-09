@@ -7,10 +7,13 @@ This is NOT part of either deployed function (it lives outside functions/,
 which is catalyst.json's declared function source root, so it is never
 bundled on `catalyst deploy`). It exercises the routing/validation logic
 directly by calling `handler()` with lightweight fake Request / job_request
-/ context objects -- no live Catalyst auth or network needed, which matters
-since the real NoSQL table (issue #1) and job pool (see
-functions/scenepaper_pipeline/main.py's _submit_pipeline_job docstring)
-don't exist yet.
+/ context objects -- no live Catalyst auth or network needed.
+
+The real zcatalyst_sdk module is replaced with a FakeCatalystSdk in
+pipeline_main's namespace (see setup below) so NoSQL calls hit an in-memory
+store instead of the real Catalyst project. The job_scheduling() path still
+raises (matching deployed behavior outside a real Catalyst runtime), so the
+POST /generate test correctly expects 502.
 
 Run it with:
     python3.9 -m venv /tmp/scenepaper_venv
@@ -119,6 +122,104 @@ class FakeContext:
 
 
 # --------------------------------------------------------------------------
+# Fake zcatalyst_sdk -- in-memory NoSQL store, no network needed
+# --------------------------------------------------------------------------
+
+FIXTURE_PAPER_ID = "fixture-paper-1"
+FIXTURE_PAPER = {
+    "id": FIXTURE_PAPER_ID,
+    "paper_number": "001",
+    "title": "Fixture paper for local routing tests",
+    "category": "curious",
+    "dek": "Not a real ScenePaper -- returned only by the fake DB layer.",
+    "verification_status": "unverified",
+    "media_status": "pending",
+    "export_status": "locked",
+}
+
+
+class _FakeNoSQLResponse:
+    """Mirrors the attribute surface of zcatalyst_sdk.nosql.transfom.NoSqlResponse."""
+    def __init__(self, operation, items):
+        self.operation = operation
+        # Items in each list match NoSqlItemResponse.to_dict() shape: {'item': <dict>}
+        self.get = items if operation == 'get' else None
+        self.create = items if operation == 'create' else None
+        self.update = items if operation == 'update' else None
+        self.delete = items if operation == 'delete' else None
+
+
+class _FakeNoSQLTable:
+    def __init__(self, store):
+        self._store = store  # shared dict[id -> item]
+
+    def insert_items(self, *args):
+        item = args[0]['item']
+        self._store[item['id']] = dict(item)
+        return _FakeNoSQLResponse('create', [{'item': dict(item)}])
+
+    def fetch_item(self, input_data):
+        paper_id = input_data['keys'][0]['id']
+        item = self._store.get(paper_id)
+        if item is None:
+            return _FakeNoSQLResponse('get', [])
+        return _FakeNoSQLResponse('get', [{'item': dict(item)}])
+
+    def update_items(self, *args):
+        req = args[0]
+        paper_id = req['keys']['id']
+        update_attrs = req.get('update_attributes', [])
+        item = self._store.get(paper_id)
+        if item:
+            for attr in update_attrs:
+                key = attr['attribute_path'][0] if attr.get('attribute_path') else None
+                if key and attr.get('operation_type') == 'PUT':
+                    item[key] = attr['update_value'].get('value')
+        return _FakeNoSQLResponse('update', [])
+
+    def delete_items(self, *args):
+        paper_id = args[0]['keys']['id']
+        self._store.pop(paper_id, None)
+        return _FakeNoSQLResponse('delete', [])
+
+
+class _FakeNoSQLService:
+    def __init__(self, store):
+        self._store = store
+
+    def get_table(self, name):
+        return _FakeNoSQLTable(self._store)
+
+
+class _FakeApp:
+    def __init__(self, store):
+        self._store = store
+
+    def nosql(self):
+        return _FakeNoSQLService(self._store)
+
+    def job_scheduling(self):
+        # Raises so POST /generate falls through to the 502 path, matching
+        # behavior outside a real Catalyst runtime.
+        raise Exception("job_scheduling unavailable outside Catalyst runtime")
+
+
+class _FakeCatalystSdk:
+    def __init__(self):
+        self._store = {}
+
+    def initialize(self):
+        return _FakeApp(self._store)
+
+
+# Patch pipeline_main before any test runs: replace zcatalyst_sdk with the
+# fake and pre-seed the NoSQL store with the fixture paper.
+_fake_sdk = _FakeCatalystSdk()
+_fake_sdk._store[FIXTURE_PAPER_ID] = dict(FIXTURE_PAPER)
+pipeline_main.zcatalyst_sdk = _fake_sdk
+
+
+# --------------------------------------------------------------------------
 # Test runner
 # --------------------------------------------------------------------------
 
@@ -156,14 +257,9 @@ def run_pipeline_route_tests():
     resp = pipeline_main.handler(FakeRequest("POST", "/ideate", {}))
     check("POST /ideate (missing topic) returns 400", response_status(resp) == 400)
 
-    # Job pool + job function now exist for real (created this session --
-    # see the docstring on _submit_pipeline_job). Locally this still can't
-    # succeed end-to-end -- there's no real Catalyst invocation context
-    # (headers/auth) outside the actual deployed runtime -- so the real SDK
-    # call fails and the route correctly falls through to the 502
-    # "downstream failure" path, not the old 503 "not configured" path.
-    # On the real deployed function this same code should actually submit
-    # the job successfully.
+    # The fake SDK's job_scheduling() raises, so the route falls through to
+    # the 502 path -- matching behavior outside a real Catalyst runtime.
+    # On the real deployed function this should return 202.
     resp = pipeline_main.handler(
         FakeRequest(
             "POST",

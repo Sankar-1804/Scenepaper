@@ -7,10 +7,9 @@ NEVER run the actual content pipeline (search, verify, structure, TTS,
 images, NoSQL write). Its only jobs are:
   1. Route incoming HTTP requests to the right handler.
   2. Validate inputs minimally.
-  3. For CRUD on ScenePaper, read/write via the NoSQL table -- currently
-     stubbed, see the TODO(issue #1) markers below. Issue #1 (confirming
-     Catalyst NoSQL column types for nested JSON fields) is not resolved
-     yet, so no real DB code is written here.
+  3. For CRUD on ScenePaper, read/write via the Catalyst NoSQL ScenePaper
+     table (issue #1 resolved -- tables exist in console, nested fields are
+     native JSON documents, no serialization needed).
   4. For POST /generate, kick off the long-running pipeline as a Job
      (Create_Immediate_Job pattern, via zcatalyst_sdk's job_scheduling
      service) targeting the `scenepaper_pipeline_job` Job function (15-min
@@ -26,14 +25,15 @@ per docs/task-breakdown.md Phase 1 + issue #8):
                            scope, issue #9 -- stubbed here)
   POST   /generate      -> validate chosen candidate, submit pipeline Job,
                            return job_id + paper_id immediately
-  GET    /paper/:id     -> read one ScenePaper row (stubbed, issue #1)
-  PUT    /paper/:id     -> update one ScenePaper row (stubbed, issue #1)
-  DELETE /paper/:id     -> delete one ScenePaper row (stubbed, issue #1)
+  GET    /paper/:id     -> read one ScenePaper document from NoSQL
+  PUT    /paper/:id     -> update one ScenePaper document in NoSQL
+  DELETE /paper/:id     -> delete one ScenePaper document from NoSQL
 
 NOT implemented here (out of scope for catalyst-agent):
-  - NoSQL table/index setup or real read/write code (blocked on issue #1)
   - SearXNG search, verification scoring (Call A), structuring (Call B),
     TTS, image fetch (api-integration-agent's scope, issues #9/#10)
+  - UserProfile reads/writes (no route currently touches UserProfile --
+    follow-up once api-integration-agent wires user_id/profile lookups)
 """
 
 import json
@@ -49,20 +49,6 @@ logger = logging.getLogger()
 
 _PAPER_ID_RE = re.compile(r"^/paper/([^/]+)/?$")
 
-# A fixture id the local test harness uses to exercise the "found" path of
-# the stubbed reads/updates/deletes below, without any real DB behind it.
-_FIXTURE_PAPER_ID = "fixture-paper-1"
-_FIXTURE_PAPER = {
-    "id": _FIXTURE_PAPER_ID,
-    "paper_number": "001",
-    "title": "Fixture paper for local routing tests",
-    "category": "curious",
-    "dek": "Not a real ScenePaper -- returned only by the stub DB layer.",
-    "verification_status": "unverified",
-    "media_status": "pending",
-    "export_status": "locked",
-}
-
 
 # --------------------------------------------------------------------------
 # Response helpers
@@ -77,69 +63,66 @@ def _error(status_code: int, message: str):
 
 
 # --------------------------------------------------------------------------
-# Stub DB layer -- TODO(issue #1)
+# NoSQL CRUD -- ScenePaper table (issue #1 resolved)
 #
-# Issue #1 (NoSQL table/index column-type verification) is not resolved.
-# Do NOT write real Catalyst NoSQL read/write code against these stubs --
-# the real column types (native JSON vs. json.dumps()'d text column) aren't
-# confirmed yet. These stubs exist purely so the routing skeleton below has
-# a clean, obvious seam to fill in once issue #1 lands.
+# Real tables exist in the Catalyst console: ScenePaper (partition key: id)
+# and UserProfile (partition key: id). All nested fields are native JSON
+# documents -- no serialization step needed.
+#
+# SDK surface (zcatalyst_sdk.nosql, verified from installed package):
+#   table.insert_items({'item': {...}})        -> NoSqlResponse (.create list)
+#   table.fetch_item({'keys': [{'id': ...}]}) -> NoSqlResponse (.get list)
+#   table.update_items({'keys': ..., 'update_attributes': [...]})
+#   table.delete_items({'keys': {'id': ...}})
+#
+# NOTE: update_value shape {'value': v} is from the type stubs; verify with
+# one live call before trusting for non-scalar values (arrays, nested dicts).
 # --------------------------------------------------------------------------
 
-def _stub_create_scenepaper(payload: dict) -> dict:
-    """
-    TODO(issue #1): Replace with a real Catalyst NoSQL insert into the
-    ScenePaper table once the column types for nested fields (hooks[],
-    scenes[], delivery_notes[], sources[], image_set[]) are confirmed.
-    Expected shape once unblocked:
-        table = zcatalyst_sdk.initialize(req).datastore().table('ScenePaper')
-        row = table.insert_row(payload)
-        return row
-    For now: returns the input payload with a generated id, so callers
-    (e.g. the /generate job-submission path) have a stable id to hand back
-    before the real DB write exists.
-    """
-    row = dict(payload)
-    row.setdefault("id", str(uuid.uuid4()))
-    return row
+def _get_nosql_table(name: str):
+    return zcatalyst_sdk.initialize().nosql().get_table(name)
 
 
-def _stub_get_scenepaper(paper_id: str):
-    """
-    TODO(issue #1): Replace with a real Catalyst NoSQL row fetch, e.g.
-        table = zcatalyst_sdk.initialize(req).datastore().table('ScenePaper')
-        row = table.get_row(paper_id)
-    For now: returns a fixture row for _FIXTURE_PAPER_ID, else None (meaning
-    "not found"), so the routing layer's 200/404 branching is exercised.
-    """
-    if paper_id == _FIXTURE_PAPER_ID:
-        return dict(_FIXTURE_PAPER)
-    return None
+def _create_scenepaper(payload: dict) -> dict:
+    item = {'id': payload.get('id') or str(uuid.uuid4()), **payload}
+    table = _get_nosql_table('ScenePaper')
+    table.insert_items({'item': item})
+    return item
 
 
-def _stub_update_scenepaper(paper_id: str, updates: dict):
-    """
-    TODO(issue #1): Replace with a real Catalyst NoSQL row update, e.g.
-        table = zcatalyst_sdk.initialize(req).datastore().table('ScenePaper')
-        row = table.update_row({**updates, 'id': paper_id})
-    For now: merges `updates` onto the fixture row for _FIXTURE_PAPER_ID,
-    else returns None (not found).
-    """
-    existing = _stub_get_scenepaper(paper_id)
+def _get_scenepaper(paper_id: str):
+    table = _get_nosql_table('ScenePaper')
+    try:
+        result = table.fetch_item({'keys': [{'id': paper_id}]})
+    except Exception:
+        return None
+    items = result.get or []
+    if not items:
+        return None
+    return items[0].get('item')
+
+
+def _update_scenepaper(paper_id: str, updates: dict):
+    existing = _get_scenepaper(paper_id)
     if existing is None:
         return None
+    table = _get_nosql_table('ScenePaper')
+    update_attrs = [
+        {'operation_type': 'PUT', 'attribute_path': [k], 'update_value': {'value': v}}
+        for k, v in updates.items()
+    ]
+    table.update_items({'keys': {'id': paper_id}, 'update_attributes': update_attrs})
     existing.update(updates)
     return existing
 
 
-def _stub_delete_scenepaper(paper_id: str) -> bool:
-    """
-    TODO(issue #1): Replace with a real Catalyst NoSQL row delete, e.g.
-        table = zcatalyst_sdk.initialize(req).datastore().table('ScenePaper')
-        table.delete_row(paper_id)
-    For now: reports success only for _FIXTURE_PAPER_ID, else "not found".
-    """
-    return paper_id == _FIXTURE_PAPER_ID
+def _delete_scenepaper(paper_id: str) -> bool:
+    existing = _get_scenepaper(paper_id)
+    if existing is None:
+        return False
+    table = _get_nosql_table('ScenePaper')
+    table.delete_items({'keys': {'id': paper_id}})
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -305,7 +288,7 @@ def _handle_get_paper(paper_id: str):
     if not paper_id:
         return _error(400, "paper id is required")
 
-    row = _stub_get_scenepaper(paper_id)
+    row = _get_scenepaper(paper_id)
     if row is None:
         return _error(404, f"no ScenePaper found with id '{paper_id}'")
     return _json_response(200, {"status": "success", "paper": row})
@@ -319,7 +302,7 @@ def _handle_put_paper(request: Request, paper_id: str):
     if not isinstance(updates, dict) or not updates:
         return _error(400, "request body must be a non-empty JSON object of fields to update")
 
-    row = _stub_update_scenepaper(paper_id, updates)
+    row = _update_scenepaper(paper_id, updates)
     if row is None:
         return _error(404, f"no ScenePaper found with id '{paper_id}'")
     return _json_response(200, {"status": "success", "paper": row})
@@ -329,7 +312,7 @@ def _handle_delete_paper(paper_id: str):
     if not paper_id:
         return _error(400, "paper id is required")
 
-    deleted = _stub_delete_scenepaper(paper_id)
+    deleted = _delete_scenepaper(paper_id)
     if not deleted:
         return _error(404, f"no ScenePaper found with id '{paper_id}'")
     return _json_response(200, {"status": "success", "message": f"deleted '{paper_id}'"})
