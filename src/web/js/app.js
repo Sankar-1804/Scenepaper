@@ -359,6 +359,24 @@
       els.candidateList.querySelectorAll(".candidate-card").forEach((btn) => {
         btn.addEventListener("click", () => {
           const candidate = candidates.find((c) => c.candidate_id === btn.dataset.candidateId);
+          // Ideation marks a candidate "thin sourcing" when the search results
+          // were too sparse to summarise into a real story -- the one-liner
+          // itself usually says so. Generating from one spends two Gemini
+          // calls to produce a scene paper with nothing behind it, so confirm
+          // first. Deliberately NOT hidden or disabled: CLAUDE.md's trust
+          // model says low scorers stay visible, the creator just shouldn't
+          // pick one by accident.
+          const thin = (candidate.flags || []).some((f) =>
+            String(f).toLowerCase().includes("thin")
+          );
+          if (thin) {
+            const ok = window.confirm(
+              "This story has thin sourcing — the search didn't find enough to " +
+                "verify it properly, so the scene paper will be weak.\n\n" +
+                "Generate anyway?"
+            );
+            if (!ok) return;
+          }
           handlePickCandidate(candidate);
         });
       });
@@ -586,7 +604,7 @@
   // assumption, not a documented field, in case a real endpoint later
   // returns one directly.
   function paperScoreInfo(paper) {
-    const used = paper.sources.filter((s) => !s.suppressed);
+    const used = (paper.sources || []).filter((s) => !s.suppressed);
     const avg = used.length
       ? Math.round(used.reduce((sum, s) => sum + s.confidence_score, 0) / used.length)
       : 0;
@@ -688,7 +706,7 @@
   }
 
   function renderHooks(paper) {
-    els.hookList.innerHTML = paper.hooks
+    els.hookList.innerHTML = (paper.hooks || [])
       .map((h) => {
         const selected = selectedHookLabel === h.label;
         return `
@@ -747,7 +765,7 @@
   }
 
   function renderScenes(paper) {
-    els.sceneRows.innerHTML = paper.scenes
+    els.sceneRows.innerHTML = (paper.scenes || [])
       .map(
         (s) => `
           <div class="scene-row" data-scene-number="${escapeHtml(s.scene_number)}" role="button" tabindex="0">
@@ -777,7 +795,7 @@
     // "Verified sources" — suppressed sources aren't part of this paper's
     // backing evidence, so (unlike Screen 2) there's no dev-only suppressed
     // section here; this screen simply doesn't show them.
-    const visible = paper.sources.filter((s) => !s.suppressed);
+    const visible = (paper.sources || []).filter((s) => !s.suppressed);
     els.sourceRows.innerHTML = visible
       .map(
         (s) => `
@@ -817,7 +835,13 @@
     // part of what the user takes to recording. Defaults to the first hook
     // so something is always active. No schema field exists for this yet,
     // so it's client-only state, not sent anywhere.
-    selectedHookLabel = paper.hooks[0] ? paper.hooks[0].label : null;
+    // `hooks` can be ABSENT, not merely empty: the schema marks it required
+    // (the key must exist) but does not forbid an empty array, and the
+    // backend prunes null-valued keys before writing to NoSQL. A live run
+    // crashed here with "undefined is not an object" because the old guard
+    // indexed before checking. Treat every schema array as possibly missing.
+    const hooks = paper.hooks || [];
+    selectedHookLabel = hooks[0] ? hooks[0].label : null;
 
     renderPaperMeta(paper);
     els.paperTitle.textContent = paper.title;
@@ -877,14 +901,15 @@
   }
 
   function renderScriptMeta(scene) {
-    const speakerCount = new Set(scene.script.map((l) => l.speaker)).size;
-    els.scriptMeta.textContent = `${scene.script.length} line${
-      scene.script.length === 1 ? "" : "s"
+    const script = scene.script || [];
+    const speakerCount = new Set(script.map((l) => l.speaker)).size;
+    els.scriptMeta.textContent = `${script.length} line${
+      script.length === 1 ? "" : "s"
     } · ${speakerCount} speaker${speakerCount === 1 ? "" : "s"}`;
   }
 
   function renderScriptLines(scene) {
-    els.scriptLines.innerHTML = scene.script
+    els.scriptLines.innerHTML = script
       .map((entry) => {
         const isQuote = isSecondarySpeaker(entry.speaker);
         const variantClass = isQuote ? "script-line--secondary" : "";
