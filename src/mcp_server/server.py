@@ -21,13 +21,12 @@ Seven tools per CLAUDE.md spec:
 """
 
 import json
-from mcp.server.mcpserver import MCPServer
+from mcp.server.fastmcp import FastMCP
 from mcp_server import http_client as _http
 
-mcp = MCPServer(
+mcp = FastMCP(
     name="scenepaper",
-    version="0.1.0",
-    description=(
+    instructions=(
         "ScenePaper pipeline: search verified story ideas, generate "
         "scene papers, retrieve and inspect them."
     ),

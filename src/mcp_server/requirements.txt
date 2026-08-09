@@ -1,0 +1,4 @@
+# MCP server runtime dependencies.
+# Run outside Catalyst (no Python 3.9 constraint) — any Python 3.10+ works.
+mcp>=1.26.0
+requests>=2.32.0
