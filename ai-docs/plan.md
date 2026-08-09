@@ -1,120 +1,187 @@
-# catalyst-agent — Plan (updated 2026-08-10)
+# api-integration-agent — Plan (rewritten 2026-08-09, ~20:00)
 
-**You are the `catalyst-agent`, working in `scenepaper-catalyst` on branch
-`feature/catalyst-backend`. Read `agents/catalyst-agent.md` for your role and
-`CLAUDE.md` for the project rules before touching code.**
+**You are the `api-integration-agent`, working in `scenepaper-api` on branch
+`feature/api-integration`. Read `agents/api-integration-agent.md` for your
+role and `CLAUDE.md` for the project rules before touching code.**
+
+This supersedes the earlier version of this file entirely — the situation
+changed a lot on 2026-08-09 and most of the old blockers are gone.
+
+## First action: commit this plan file
+
+Before any other work, commit **this file only** to `feature/api-integration`:
+
+```
+git add ai-docs/plan.md
+git commit -m "Add api-integration-agent plan for the pipeline integration push"
+git push
+```
+
+It is the record of what you were asked to do, so it should exist in git
+before the work starts. This one commit does not need a checkpoint — it is
+a doc file the user has already approved. **Everything after it does.**
 
 ## Follow the loop in CLAUDE.md
 
-ORIENT → PLAN → ACT → VERIFY → **CHECKPOINT** → COMMIT. Present the diff and
-wait for explicit approval before committing. Never push to `main`.
+ORIENT → PLAN → ACT → VERIFY → **CHECKPOINT** → COMMIT. Step 5 is
+non-negotiable: present the diff and wait for explicit approval before
+committing. Do not commit or push without it.
 
-Stay inside this worktree. Do not edit `scenepaper-api`, `scenepaper-ui`, or
-`scenepaper-mcp`.
+Stay inside this worktree. Do not edit `scenepaper-catalyst`,
+`scenepaper-ui`, or `scenepaper-mcp` — other sessions own those.
 
 ---
 
-## What is done (verified live — don't redo it)
+## What is already true (verified live, don't re-derive)
 
-**The full end-to-end pipeline works against the real Catalyst project.**
+**Everything below has been tested against real services today. Trust it.**
 
+### Gemini works
+- `gemini_client.py` Call A (verify) and Call B (structure) both run live and
+  return good output. Prompts are written.
+- `GEMINI_MODELS` is a **fallback chain** — it walks models, then API keys, on
+  429/quota and 404/retired. `gemini-2.5-flash` is dead on our account (404),
+  `gemini-2.0-flash` has a free-tier limit of 0. Primary is `gemini-3.6-flash`.
+- **Quota is the scarce resource: RPD 20 per model, per key.** Failed calls
+  still consume it. Budget your live testing; prefer fake clients in tests.
+  Add `GEMINI_API_KEY_2`/`_3` to `.env` if the user has provided them.
+
+### SearXNG is running
+- Live at **`http://localhost:8888`**, JSON enabled. `.env` already points at it.
+- Restart if needed: `~/Desktop/Personal/Projects/searxng/start-scenepaper.sh --bg`
+- Verified working: `_execute_searxng_query` returns ~28 results;
+  `score_domain_quality` discriminates correctly (BBC 0.90, blogs 0.40);
+  `cluster_results` collapses 28 → 16 clusters.
+- Engines `wikidata`/`brave`/`startpage` fail or CAPTCHA; `duckduckgo` and
+  `google cse` carry it. That's fine — don't chase it.
+
+### Voicebox is running
+- The Mac app ships its own server — no CLI install needed.
+- **Use the port the GUI app itself is running on, NOT a server you start
+  yourself.** The app runs `voicebox-server` with
+  `--data-dir "~/Library/Application Support/sh.voicebox.app"`, and that data
+  dir is where the voice profiles live. A server started without it sees an
+  empty profile list and looks broken. Find the live port with:
+  `ps aux | grep voicebox-server` — look for the one with `--data-dir`.
+  As of 2026-08-09 it was **port 17493**, but it changes between app launches,
+  so detect it rather than hardcoding.
+- A voice profile named **"Vivian"** exists (CustomVoice, `en`, engine
+  `qwen_custom_voice`). Fetch its real id from `GET /profiles`.
+- **The real API is `POST /generate` with `{profile_id, text, instruct, ...}`**,
+  then `GET /generate/{id}/status` and `GET /audio/{generation_id}`.
+- `voicebox_client.py` currently assumes `/api/tts`, **which does not exist**.
+  That is a real bug to fix.
+- `instruct` maps naturally onto our per-line `direction` field — use it.
+- Do NOT test against port 8000 — a stale `python -m http.server` squats there
+  and returns 200, which has already caused one false positive.
+
+### The Catalyst backend is live
 Base URL: `https://scenepaper-60081628315.development.catalystserverless.in`
 
-| Route | Status |
+| Route | Notes |
 |---|---|
-| `POST /ideate` | 200, returns real SearXNG+Gemini candidates (~25.2s — see timing risk below) |
-| `POST /generate` | 202 + `job_id` + `paper_id`; Job runs to SUCCESS, writes a full ScenePaper to NoSQL |
-| `GET/PUT/DELETE /paper?id=<id>` | reads NoSQL with correct 400/404 |
+| `POST /ideate` | works; returns stub candidates (yours to make real) |
+| `POST /generate` | works; returns 202 + `job_id` + `paper_id`, job completes |
+| `GET/PUT/DELETE /paper?id=<id>` | works; **query param, NOT a path segment** |
 
-**Last confirmed working paper:** `3a6d29ff-cb6e-49b4-a666-42f5397aa913` ("The Failure That Built Slack", 6.0/10, 2026-08-10).
+The Gateway cannot carry a changing ID in a path, hence `?id=`. Use that form.
 
-**What the pipeline actually does end to end:**
-1. `POST /ideate` → classify topic → SearXNG queries → domain-quality filter → cluster → Gemini one-liners → 3-4 candidates
-2. `POST /generate` → Advanced I/O function submits a Job, returns `{job_id, paper_id}` immediately
-3. Job function: Call A (Gemini verification/scoring) → Call B (Gemini structuring → full schema) → Pexels images per scene → NoSQL write
-4. `GET /paper?id=` → reads the document, normalizes types (Decimal→float, "true"/"false"→bool)
+### Schema (settled — do not re-litigate)
+Rule 5 has **two mechanisms**, deliberately:
+- `hooks[].text` → `[{text, verified}]` inline spans
+- `scenes[].claims[]` → `[{text, verified, sources[]}]`, and
+  `scenes[].script[].line` is a **plain string**
 
-**Latest commits on `feature/catalyst-backend`:**
-- `9e2847e` — Fix NoSQL type round-trip: Decimal→float, BOOL str→bool in GET response
-- `3371fb4` — Wire real ideation + Pexels images; harden job function pipeline
-
-**Test suite:** `python3.9 tests/test_scenepaper_pipeline_routes.py` — 37/37 pass, fully offline (in-memory fake SDK). Never require live credentials for the test suite.
-
-### Hard-won gotchas — these cost real time, don't rediscover them
-
-1. **`job_name` is capped at 20 characters.** Longer values make Catalyst
-   reject the *entire* job submission with `INVALID_INPUT`. Pinned by a check in the test harness.
-2. **The SDK must be initialized with the request.**
-   `zcatalyst_sdk.initialize(req=request)` at the top of `handler()` is load-bearing — every NoSQL call and job submission inherits the credentials from this. Never move it.
-3. **`.job` is a `@property`, not a method.** `app.job_scheduling().job` —
-   calling it as `.job()` raises `TypeError: 'Job' object is not callable`.
-4. **The API Gateway rewrites each rule to a fixed target path**, so it cannot
-   carry a per-request id. That's why `/paper` takes `?id=`. `catalyst deploy` does **not** touch Gateway rules.
-5. **Never let a NoSQL failure return silently.** Keep failures logged.
-6. `catalyst functions:add` defaults `requirements.txt` to `zcatalyst-sdk==1.4.0` (Python ≥3.10). **Always repin to `1.3.0`.**
-7. **`_floats_to_decimal` + `_drop_null_values` must both run before `to_nosql()`**. Floats raise TypeError in TypeSerializer; None raises INVALID_INPUT from Catalyst.
-8. **`_normalize_nosql_item` must run on every GET response** — Catalyst may return `{"BOOL": "true"}` (JSON string, not JSON boolean), and TypeDeserializer passes it through unchanged. Without normalization, every verified-false span renders as verified fact in the UI.
+This matches the web client exactly. `CALL_B_RESPONSE_SCHEMA` already emits it.
 
 ---
 
-## Open work items
+## Work item 1 — Make `/ideate` real (highest value, fully unblocked)
 
-### Item A — Deploy + live type verification (pending, next step)
+The ideation pipeline is **already written** in `searxng_client.py` —
+`classify_query`, `generate_broad_queries`, `discover_specific_axis`,
+`generate_specific_queries`, `_execute_searxng_query`, `score_domain_quality`,
+`cluster_results`, `fetch_top_results_per_cluster`, `ShowMeMoreSession`. It has
+simply never been run end to end against a live SearXNG, which now exists.
 
-The type fix (`_normalize_nosql_item`) is committed and pushed but **not yet deployed**. The live backend still has the old behavior.
+**Tag: hil** — candidate quality is a judgment call, and the query-generation
+prompts need tuning against real output.
 
+Steps:
+1. Write one function that takes a topic and returns 3–4 candidate one-liners,
+   chaining the pieces above. Put it somewhere obvious, e.g.
+   `src/backend/ideation.py`.
+2. Run it against real topics. Read the actual candidates. Are they genuinely
+   distinct stories, or near-duplicates? Tune the query-generation prompts
+   until the angles differ structurally (era/industry/failure-vs-success),
+   not just in wording.
+3. Always return the top 3 regardless of score. The only suppression is
+   fabrication/satire/AI-content-farm, and suppressed candidates are still
+   returned with their reason. See CLAUDE.md's trust model.
+4. Watch quota — every query-generation call is a Gemini call.
+
+## Work item 2 — Build the orchestrator (the keystone)
+
+**Nothing currently calls Call A or Call B.** `verify_and_score_candidate` and
+`structure_scene_paper` have zero callers outside tests, and
+`profile_parser.build_profile_preferences_as_data()` — the injection defense —
+is never invoked. This is the single most important missing piece: it is what
+`catalyst-agent` will import to make the job function real.
+
+**Tag: afk** for the wiring; **hil** for reading the first real output.
+
+Write `src/backend/orchestrator.py` exposing roughly:
+
+```python
+def generate_scene_paper(topic, candidate, profile_md_text=None) -> dict:
+    # 1. fetch source material for the chosen candidate (SearXNG + fetch)
+    # 2. Call A: verify_and_score_candidate(candidate_summary, sources)
+    # 3. profile_parser.build_profile_preferences_as_data(profile_md_text)
+    # 4. Call B: structure_scene_paper(source_material, verification, framed)
+    # 5. return a dict shaped like CLAUDE.md's ScenePaper entity
 ```
-catalyst deploy --only functions
-```
 
-Then: one `POST /generate` call to confirm `confidence_score` is a JSON number
-and `verified` is a JSON boolean in the GET response. Each live run costs
-**2 Gemini calls against a 20/day/model quota** — budget carefully.
+Hard requirements, all already enforced in code — do not weaken them:
+- Call A must never receive profile content (it has no parameter for it).
+- Call B receives Call A's `VerificationResult` as a fixed input.
+- Profile text must go through `build_profile_preferences_as_data()`;
+  `structure_scene_paper` will raise if handed unframed strings.
+- Surface `parsed.warnings` / `dropped_sections` rather than discarding them.
 
-### Item B — ONE_LINER_PROMPT review (DRAFT, human-in-the-loop required)
+Design it so `catalyst-agent` can import and call it from the Job function
+with minimal ceremony. Keep it importable under **Python 3.9** — that is the
+Catalyst runtime cap.
 
-`functions/scenepaper_pipeline_job/backend/ideation.py`'s `ONE_LINER_PROMPT` is
-marked DRAFT pending user review — per `docs/task-breakdown.md` Tasklist 2.1
-("Ideation prompt tuning" is a `hil` item). Do not finalize it without the user
-reviewing it against real SearXNG output.
+## Work item 3 — Fix `voicebox_client.py` and wire TTS
 
-### Item C — /ideate timing risk (known, do not fix by trimming quality)
+**Tag: afk** once a voice profile exists.
 
-`POST /ideate` runs in ~25.2s against the 30s Advanced I/O cap. Intermittent
-timeouts are expected. **Correct fix:** move ideation into its own Job function
-with polling (matching the `/generate` pattern). Do not trim search quality as
-a shortcut — it destroys the verification moat. See `docs/catalyst-notes.md`
-"Operational risks" for the full note.
+1. Replace the assumed `/api/tts` with the real `POST /generate`
+   (`profile_id` + `text`, plus `instruct` from the scene's `direction`).
+2. Handle the async shape: submit → poll `GET /generate/{id}/status` →
+   fetch `GET /audio/{generation_id}`.
+3. Read the profile id from `GET /profiles` rather than hardcoding it.
 
-### Item D — SEARXNG_BASE_URL is an ngrok tunnel URL
+## Work item 4 — Images
 
-The `SEARXNG_BASE_URL` Cache value is an ngrok URL that dies on tunnel restart.
-If `/ideate` fails for no apparent reason, check this first — update the Cache
-value to the new tunnel URL. See `docs/catalyst-notes.md` for the full note.
-
-### Item E — Vendored backend/ sync
-
-`functions/*/backend/` are vendored copies of `scenepaper-api/src/backend/`.
-As of 2026-08-10 the vendored copies are **ahead** (5xx retry logic, ideation.py
-not yet on scenepaper-api's main). Those changes must land on scenepaper-api or
-the copies are the authoritative source, which is backwards. See
-`docs/catalyst-notes.md` "Operational risks" for the full rule.
-
-### Item F — UserProfile (only if there's real slack)
-
-No route touches `UserProfile` yet. The free-tier counter
-(`scenepapers_generated_count`, `free_limit = 10`) needs somewhere to live.
-Coordinate with `ui-agent` on what it needs rather than inventing an API.
+**Tag: afk.** `pexels_client.py` works. Note: Pexels' search endpoint returns
+results **without** an API key — verified live — so the docstring claiming
+401s is wrong. Fix that comment while you're there. Wire per-scene keyword →
+image into whatever the orchestrator returns.
 
 ---
 
 ## Verification before any checkpoint
 
 ```
-cd /Users/sankara-17600/Desktop/Personal/Projects/scenepaper-catalyst
-python3.9 tests/test_scenepaper_pipeline_routes.py
+cd /Users/sankara-17600/Desktop/Personal/Projects/scenepaper-api
+PYTHONPATH=src python3.9 -m pytest src/tests/ -o testpaths= -q
 ```
-This is a standalone script, **not** pytest-discoverable — run it directly.
-All checks pass offline. Keep it that way.
+61 tests currently pass. Keep them passing. Prefer fake clients over live
+calls in tests — real calls burn the daily quota the demo depends on.
 
-To deploy: `catalyst deploy --only functions` from this directory.
+## Order
+
+1. Work item 2 (orchestrator) — **do this first**, catalyst-agent is waiting on it.
+2. Work item 1 (real ideation).
+3. Work items 3 and 4 as time allows.
