@@ -95,6 +95,10 @@ def _get_scenepaper(paper_id: str):
     try:
         result = table.fetch_item({'keys': [{'id': paper_id}]})
     except Exception:
+        # MUST log. A silent `return None` here makes a genuine NoSQL/network
+        # failure indistinguishable from "no such paper" -- both surface as a
+        # 404 -- which made it impossible to verify NoSQL was working at all.
+        logger.exception("NoSQL fetch failed for paper_id=%s", paper_id)
         return None
     items = result.get or []
     if not items:
@@ -351,6 +355,18 @@ def handler(request: Request):
     API Gateway route wiring (so this is reachable by path) is a separate,
     still-blocked step per issue #8 -- not done in this session.
     """
+    # Initialize the SDK ONCE, here, with the request. initialize() runs
+    # parse_headers_from_request(req), which establishes this invocation's
+    # admin credentials; every later bare initialize() call in this module
+    # (the NoSQL helpers) then picks those up. Skipping this is what made job
+    # submission fail, and it would silently break every NoSQL call the same
+    # way -- silently, because a failed read is indistinguishable from
+    # "not found" at the HTTP layer.
+    try:
+        zcatalyst_sdk.initialize(req=request)
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("zcatalyst_sdk.initialize(req=...) failed")
+
     method = request.method
     path = request.path or "/"
 
@@ -363,15 +379,41 @@ def handler(request: Request):
     if path == "/generate" and method == "POST":
         return _handle_generate(request)
 
+    # Paper CRUD accepts the id EITHER as a path segment (/paper/<id>) or as
+    # a query parameter (/paper?id=<id>).
+    #
+    # The query-param form exists because of a hard API Gateway constraint:
+    # a Gateway rule rewrites the incoming path to a FIXED target string, so
+    # a rule for /paper can only ever forward "/paper" -- there is no way to
+    # carry a per-request id through the path. Query strings pass through
+    # untouched, so ?id= is the only form that works through the Gateway.
+    #
+    # The path form is kept because it still works for direct/local
+    # invocation (`catalyst serve`, the test harness) and is the nicer URL if
+    # Gateway ever supports path parameters.
     paper_match = _PAPER_ID_RE.match(path)
-    if paper_match:
-        paper_id = paper_match.group(1)
+    paper_id = paper_match.group(1) if paper_match else None
+
+    if paper_id is None and path.rstrip("/") == "/paper":
+        try:
+            paper_id = (request.args.get("id") or "").strip() or None
+        except AttributeError:  # request object without .args (test fakes)
+            paper_id = None
+        if paper_id is None:
+            return _error(
+                400,
+                "paper id is required -- call /paper?id=<paper_id> "
+                "(the API Gateway cannot carry a path id, see the note in "
+                "handler())",
+            )
+
+    if paper_id is not None:
         if method == "GET":
             return _handle_get_paper(paper_id)
         if method == "PUT":
             return _handle_put_paper(request, paper_id)
         if method == "DELETE":
             return _handle_delete_paper(paper_id)
-        return _error(405, f"method '{method}' not allowed on /paper/:id")
+        return _error(405, f"method '{method}' not allowed on /paper")
 
     return _error(404, f"unknown route: {method} {path}")

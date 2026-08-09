@@ -90,10 +90,13 @@ job_main = _load_module_from_path(
 # --------------------------------------------------------------------------
 
 class FakeRequest:
-    def __init__(self, method, path, json_body=None):
+    def __init__(self, method, path, json_body=None, args=None):
         self.method = method
         self.path = path
         self._json_body = json_body
+        # Mirrors Flask's request.args. The Gateway can't carry a path id, so
+        # /paper takes ?id=<paper_id> -- see the note in handler().
+        self.args = dict(args or {})
 
     def get_json(self, silent=False):
         return self._json_body
@@ -245,6 +248,24 @@ def response_json(resp):
 
 def run_pipeline_route_tests():
     print("\n--- functions/scenepaper_pipeline (Advanced I/O) routing ---")
+
+    # /paper?id=<id> -- the only form that survives the API Gateway, which
+    # rewrites each rule to a fixed target path and so cannot carry a
+    # per-request id in the path.
+    resp = pipeline_main.handler(
+        FakeRequest("GET", "/paper", args={"id": FIXTURE_PAPER_ID})
+    )
+    check("GET /paper?id=<known> returns 200", response_status(resp) == 200)
+
+    resp = pipeline_main.handler(FakeRequest("GET", "/paper", args={"id": "nope"}))
+    check("GET /paper?id=<unknown> returns 404", response_status(resp) == 404)
+
+    resp = pipeline_main.handler(FakeRequest("GET", "/paper"))
+    check("GET /paper with no id returns 400", response_status(resp) == 400)
+
+    # The path form must keep working for direct/local invocation.
+    resp = pipeline_main.handler(FakeRequest("GET", f"/paper/{FIXTURE_PAPER_ID}"))
+    check("GET /paper/<id> (path form) still returns 200", response_status(resp) == 200)
 
     # Catalyst rejects job_name longer than 20 chars with INVALID_INPUT,
     # failing the ENTIRE job submission. This is invisible in the SDK (it
