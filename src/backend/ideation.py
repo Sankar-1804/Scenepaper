@@ -9,17 +9,16 @@ now-live SearXNG instance (ai-docs/plan.md, 2026-08-09):
     _execute_searxng_query (per query) -> cluster_results (domain-quality
     filtered) -> fetch_top_results_per_cluster -> [one-liner generation]
 
-Deliberately NOT built here: the prompt that turns a cluster's fetched
-results into the one-liner text a creator actually reads and picks from.
-That is the same category of judgment call as gemini_client.py's
-STRUCTURING_PROMPT / VERIFICATION_RULES_PROMPT -- docs/task-breakdown.md
-Tasklist 2.1 flags "Ideation prompt tuning (quality of 3-4 one-liners)" as
-hil, and searxng_client.py's own module docstring reserves this exact step
-for a human-driven session. ONE_LINER_PROMPT below is a None placeholder for
-that reason. Do not fill it in as an agent -- see that constant's comment.
+ONE_LINER_PROMPT (the text a creator actually reads and picks from) is the
+same category of judgment call as gemini_client.py's STRUCTURING_PROMPT /
+VERIFICATION_RULES_PROMPT, which were drafted with the human and approved.
+docs/task-breakdown.md Tasklist 2.1 flags "Ideation prompt tuning" as hil.
+The current value is a DRAFT pending review -- see that constant's comment.
 
-Everything above the one-liner step (query generation, search execution,
-domain-quality filtering, clustering) is real and safe to run/test today.
+generate_candidate_one_liners() returns each candidate WITH the real sources
+from its cluster, so POST /generate can feed them straight into Call A. That
+is what makes the verification score meaningful: it reflects sources the
+system found, not sources a caller typed in by hand.
 """
 
 from __future__ import annotations
@@ -27,6 +26,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from backend.clients.gemini_client import (
+    _client as _gemini_client,
+    _generate_with_model_fallback,
+)
 from backend.clients.searxng_client import (
     SearchResult,
     _execute_searxng_query,
@@ -39,11 +42,40 @@ from backend.clients.searxng_client import (
 
 logger = logging.getLogger(__name__)
 
-# Reserved for the human -- see module docstring. Do not draft this as an
-# agent; it is user-facing creative output (what a creator reads and picks
-# from), the same category of work as gemini_client.py's structuring/
-# verification prompts.
-ONE_LINER_PROMPT = None
+# User-facing creative output (what a creator reads and picks from), the same
+# category as gemini_client.py's verification/structuring prompts -- which
+# were drafted with the human and approved rather than written blind.
+#
+# DRAFT, 2026-08-10, pending the user's review. Written to unblock the live
+# ideation path (this step raised NotImplementedError before any search ran,
+# so /ideate could not be wired at all). Tune against real candidate output;
+# the anti-hype framing is the part that matters, since it mirrors the trust
+# model -- help the creator judge a story, don't sell it to them.
+ONE_LINER_PROMPT = """\
+You turn clusters of real search results into short candidate story
+one-liners that a short-form video creator will choose between.
+
+Each cluster is a group of search results about the SAME underlying story,
+with a representative title, URL and snippet.
+
+For each cluster, write ONE one-liner that:
+- States what actually happened, concretely -- a specific subject and a
+  specific turn of events. "A 1900 lighthouse was rolled 70 metres inland to
+  escape the sea" beats "An amazing story of engineering."
+- Uses ONLY what the cluster's results actually say. Do not add facts,
+  figures, names or outcomes that are not in the material. If the snippets
+  are too thin to say anything specific, say so plainly rather than
+  inventing detail.
+- Is a single sentence of roughly 12-25 words, written to help someone decide
+  whether the story is worth telling -- not to sell it. No hype, no
+  clickbait, no rhetorical questions.
+
+Across the set, prefer one-liners that are clearly DIFFERENT stories rather
+than restatements of the same event. If two clusters are in fact the same
+story, say so rather than padding the list.
+
+Return the candidates in the order given.
+"""
 
 # Below this domain-quality score, a result is dropped before clustering
 # (CLAUDE.md: "domain-quality scoring happens before clustering"). Set just
@@ -114,6 +146,7 @@ def gather_candidate_clusters(
 def generate_candidate_one_liners(
     topic: str,
     niche: str | None = None,
+    num_sources_per_candidate: int = 3,
     *,
     client=None,
 ) -> list[dict]:
@@ -133,5 +166,85 @@ def generate_candidate_one_liners(
             "is real and safe to call/test on its own without this."
         )
 
-    _request_type, _clusters = gather_candidate_clusters(topic, niche, client=client)
-    raise NotImplementedError("unreachable until ONE_LINER_PROMPT is written")
+    _request_type, clusters = gather_candidate_clusters(topic, niche, client=client)
+    if not clusters:
+        return []
+
+    # Always surface the top 3 regardless of score (CLAUDE.md trust model:
+    # suppressing low scorers silently narrows the library to well-SEO'd
+    # mainstream stories, which is the opposite of the point). Take a 4th when
+    # there is one, since the product promises "3-4".
+    clusters = clusters[:4]
+
+    cluster_block = "\n\n".join(
+        "[{i}] title: {t}\n    url: {u}\n    snippet: {s}\n    other results in cluster: {n}".format(
+            i=i + 1,
+            t=c.representative.title,
+            u=c.representative.url,
+            s=(c.representative.content or "")[:600],
+            n=max(len(c.results) - 1, 0),
+        )
+        for i, c in enumerate(clusters)
+    )
+
+    from google.genai import types  # local import: keeps module import cheap
+
+    schema = types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "candidates": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "cluster_index": types.Schema(type=types.Type.INTEGER),
+                        "one_liner": types.Schema(type=types.Type.STRING),
+                        "too_thin_to_summarize": types.Schema(type=types.Type.BOOLEAN),
+                    },
+                    required=["cluster_index", "one_liner"],
+                ),
+            )
+        },
+        required=["candidates"],
+    )
+
+    response = _generate_with_model_fallback(
+        client or _gemini_client(),
+        contents=f"{ONE_LINER_PROMPT}\n\nTopic: {topic}\n\nClusters:\n{cluster_block}",
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json", response_schema=schema
+        ),
+    )
+
+    import json
+
+    payload = response.parsed if hasattr(response, "parsed") else response.text
+    data = payload if isinstance(payload, dict) else json.loads(payload)
+
+    candidates: list[dict] = []
+    for entry in data.get("candidates", []):
+        idx = int(entry.get("cluster_index", 0)) - 1
+        if not (0 <= idx < len(clusters)):
+            continue
+        cluster = clusters[idx]
+        # Carry the cluster's real sources through with the candidate. This is
+        # what makes verification meaningful downstream: POST /generate feeds
+        # these straight into Call A, so the score reflects sources the system
+        # actually found rather than ones a caller typed in by hand.
+        candidates.append(
+            {
+                "one_liner": entry.get("one_liner", ""),
+                "too_thin_to_summarize": entry.get("too_thin_to_summarize", False),
+                "sources": [
+                    {
+                        "title": r.title,
+                        "url": r.url,
+                        "snippet": (r.content or "")[:1500],
+                        "source_type": "web",
+                    }
+                    for r in cluster.results[:num_sources_per_candidate]
+                ],
+            }
+        )
+
+    return candidates

@@ -156,6 +156,54 @@ def test_gather_candidate_clusters_uses_specific_flow_for_named_subjects(monkeyp
 # ---------------------------------------------------------------------------
 
 
-def test_generate_candidate_one_liners_is_blocked_until_the_human_writes_the_prompt():
-    with pytest.raises(NotImplementedError, match="ONE_LINER_PROMPT"):
-        ideation.generate_candidate_one_liners("any topic")
+def test_one_liner_prompt_is_written():
+    """Was a NotImplementedError guard until 2026-08-10, when the prompt was
+    drafted to unblock the live /ideate path. Still flagged DRAFT pending the
+    user's review -- see the constant's comment."""
+
+    assert isinstance(ideation.ONE_LINER_PROMPT, str)
+    assert len(ideation.ONE_LINER_PROMPT) > 200
+
+
+def test_candidates_carry_their_cluster_sources(monkeypatch):
+    """The whole point of threading sources through ideation: POST /generate
+    feeds them into Call A, so the verification score reflects sources the
+    system FOUND rather than ones a caller typed in by hand."""
+
+    from backend.clients.searxng_client import SearchResult
+
+    cluster = ideation.CandidateCluster(results=[
+        SearchResult(title="T1", url="https://example.org/a", content="snippet one"),
+        SearchResult(title="T2", url="https://example.org/b", content="snippet two"),
+    ])
+    monkeypatch.setattr(
+        ideation, "gather_candidate_clusters", lambda *a, **k: ("broad", [cluster])
+    )
+
+    class _Resp:
+        parsed = {"candidates": [{"cluster_index": 1, "one_liner": "A real thing happened."}]}
+
+    monkeypatch.setattr(
+        ideation, "_generate_with_model_fallback", lambda *a, **k: _Resp()
+    )
+
+    out = ideation.generate_candidate_one_liners("topic", client=object())
+    assert len(out) == 1
+    assert out[0]["one_liner"] == "A real thing happened."
+    assert [s["url"] for s in out[0]["sources"]] == [
+        "https://example.org/a",
+        "https://example.org/b",
+    ]
+
+
+def test_no_clusters_returns_empty_rather_than_calling_gemini(monkeypatch):
+    monkeypatch.setattr(
+        ideation, "gather_candidate_clusters", lambda *a, **k: ("broad", [])
+    )
+    called = []
+    monkeypatch.setattr(
+        ideation, "_generate_with_model_fallback",
+        lambda *a, **k: called.append(1),
+    )
+    assert ideation.generate_candidate_one_liners("topic", client=object()) == []
+    assert not called, "must not spend quota when there is nothing to summarize"

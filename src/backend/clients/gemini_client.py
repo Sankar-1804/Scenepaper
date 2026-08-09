@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from dataclasses import dataclass
 
 from google import genai
@@ -116,11 +117,27 @@ GEMINI_MODELS = (
 # and because "which model did we actually decide on" should stay greppable.
 GEMINI_MODEL = GEMINI_MODELS[0]
 
-# Status codes worth failing over to the next model for. 429 = quota/rate
-# limit. 404 = model retired out from under us, which is exactly what happened
-# to gemini-2.5-flash — auto-skipping it means a future retirement degrades
-# instead of breaking the demo.
-_FAILOVER_STATUS_CODES = frozenset({404, 429})
+# Status codes worth retrying/failing over on.
+#
+#   429      quota or rate limit — try the next model/key.
+#   404      model retired out from under us (exactly what happened to
+#            gemini-2.5-flash) — auto-skipping means a future retirement
+#            degrades instead of breaking the demo.
+#   5xx      transient upstream faults on Google's side.
+#
+# The 5xx entries were added 2026-08-09 after a live job died on:
+#   POST .../gemini-3.6-flash:generateContent "HTTP/1.1 503 Service Unavailable"
+# The chain only covered {404, 429}, so a momentary blip on Google's side
+# re-raised immediately and killed the whole pipeline run. Transient upstream
+# errors are precisely what a fallback chain exists to absorb.
+_FAILOVER_STATUS_CODES = frozenset({404, 429, 500, 502, 503, 504})
+
+# 5xx is usually a blip: the SAME model typically works a second or two later,
+# so retry in place before spending a different model's quota. 429/404 are
+# NOT retried in place — those are states that won't clear in two seconds.
+_RETRYABLE_IN_PLACE_STATUS_CODES = frozenset({500, 502, 503, 504})
+_IN_PLACE_RETRIES = 2
+_IN_PLACE_RETRY_BACKOFF_SECONDS = 2.0
 
 
 # Free-tier quota is scoped per PROJECT per model, so a second/third API key
@@ -180,6 +197,10 @@ def _generate_with_model_fallback(client, *, contents, config):
     into play if that client's models are all exhausted AND extra keys are
     configured.
 
+    Transient 5xx faults are retried IN PLACE first (same model, short
+    backoff) before moving on, since they usually clear in a second or two and
+    burning a different model's quota over a blip would be wasteful.
+
     Returns the raw SDK response. Re-raises immediately on any non-failover
     error (see `_should_try_next_model`), and raises RuntimeError only once
     every model on every key is unavailable.
@@ -194,22 +215,36 @@ def _generate_with_model_fallback(client, *, contents, config):
 
     for key_label, active_client in clients:
         for model in GEMINI_MODELS:
-            try:
-                return active_client.models.generate_content(
-                    model=model, contents=contents, config=config
-                )
-            except Exception as exc:  # noqa: BLE001 — re-raised unless failover
-                if not _should_try_next_model(exc):
-                    raise
-                last_error = exc
-                logger.warning(
-                    "Gemini model %r unavailable on %s (code %s) — trying the "
-                    "next model/key. Note that failed calls still consume RPD "
-                    "quota.",
-                    model,
-                    key_label,
-                    getattr(exc, "code", "?"),
-                )
+            for attempt in range(_IN_PLACE_RETRIES + 1):
+                try:
+                    return active_client.models.generate_content(
+                        model=model, contents=contents, config=config
+                    )
+                except Exception as exc:  # noqa: BLE001 — re-raised unless failover
+                    if not _should_try_next_model(exc):
+                        raise
+                    last_error = exc
+                    code = getattr(exc, "code", None)
+
+                    retryable = code in _RETRYABLE_IN_PLACE_STATUS_CODES
+                    if retryable and attempt < _IN_PLACE_RETRIES:
+                        wait = _IN_PLACE_RETRY_BACKOFF_SECONDS * (attempt + 1)
+                        logger.warning(
+                            "Gemini %r returned %s (transient) on %s — retrying "
+                            "the same model in %.1fs (attempt %d/%d).",
+                            model, code, key_label, wait,
+                            attempt + 1, _IN_PLACE_RETRIES,
+                        )
+                        time.sleep(wait)
+                        continue
+
+                    logger.warning(
+                        "Gemini model %r unavailable on %s (code %s) — trying "
+                        "the next model/key. Note that failed calls still "
+                        "consume RPD quota.",
+                        model, key_label, code,
+                    )
+                    break  # give up on this model, move to the next
 
     raise RuntimeError(
         f"Every model ({', '.join(GEMINI_MODELS)}) was unavailable across "
