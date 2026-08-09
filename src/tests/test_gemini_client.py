@@ -532,3 +532,79 @@ def test_structure_scene_paper_accepts_properly_framed_preferences():
         "source text", verification, framed, client=_FakeClient(_paper_payload())
     )
     assert result["verification_status"] == "solid"
+
+
+# ---------------------------------------------------------------------------
+# Multi-key rotation. Free-tier quota is per project per model, so extra keys
+# from other Google accounts each carry their own RPD 20 -- ~180 calls total
+# across 3 keys x 3 models. Rotation is programmatic so nothing has to be
+# swapped by hand mid-demo.
+# ---------------------------------------------------------------------------
+
+
+def test_available_api_keys_collects_primary_and_extras(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-one")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-two")
+    monkeypatch.setenv("GEMINI_API_KEY_3", "key-three")
+    assert gemini_client._available_api_keys() == ["key-one", "key-two", "key-three"]
+
+
+def test_available_api_keys_dedupes_and_skips_blanks(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "same")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "   ")
+    monkeypatch.setenv("GEMINI_API_KEY_3", "same")
+    assert gemini_client._available_api_keys() == ["same"]
+
+
+def test_an_explicit_key_is_used_alone(monkeypatch):
+    """A caller that named a key means it. Silently failing over to another
+    account would make debugging a bad key genuinely confusing."""
+
+    monkeypatch.setenv("GEMINI_API_KEY", "env-key")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "other-key")
+    assert gemini_client._available_api_keys("explicit") == ["explicit"]
+
+
+def test_exhausted_primary_key_rotates_to_the_second_key(monkeypatch):
+    """All models 429 on key 1 -> build a client for key 2 and keep going."""
+
+    monkeypatch.setenv("GEMINI_API_KEY", "key-one")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-two")
+    monkeypatch.delenv("GEMINI_API_KEY_3", raising=False)
+
+    second = _FakeClient(_paper_payload())
+    monkeypatch.setattr(gemini_client.genai, "Client", lambda **kw: second)
+
+    exhausted = _FakeClient(
+        _paper_payload(), fail_models={m: 429 for m in gemini_client.GEMINI_MODELS}
+    )
+    verification = VerificationResult(
+        overall_confidence_score=8, overall_tag="solid", overall_flags=[], sources=[]
+    )
+
+    result = gemini_client.structure_scene_paper(
+        "source text", verification, [], client=exhausted
+    )
+
+    assert result["verification_status"] == "solid"
+    # every model tried on key 1, then the first model on key 2 succeeded
+    assert exhausted.models.attempted_models == list(gemini_client.GEMINI_MODELS)
+    assert second.models.attempted_models == [gemini_client.GEMINI_MODELS[0]]
+
+
+def test_error_names_the_extra_key_env_vars_when_everything_is_exhausted(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "only-key")
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_3", raising=False)
+
+    exhausted = _FakeClient(
+        _paper_payload(), fail_models={m: 429 for m in gemini_client.GEMINI_MODELS}
+    )
+    verification = VerificationResult(
+        overall_confidence_score=8, overall_tag="solid", overall_flags=[], sources=[]
+    )
+
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY_2"):
+        gemini_client.structure_scene_paper(
+            "source text", verification, [], client=exhausted
+        )

@@ -123,6 +123,38 @@ GEMINI_MODEL = GEMINI_MODELS[0]
 _FAILOVER_STATUS_CODES = frozenset({404, 429})
 
 
+# Free-tier quota is scoped per PROJECT per model, so a second/third API key
+# from a different Google account carries its own independent RPD 20 per model.
+# Three keys x three models x 20 = ~180 calls/day, which is the difference
+# between "budget the demo carefully" and "stop thinking about it".
+#
+# Read from the environment so keys never live in source. Ordered: primary
+# first, extras after.
+#
+# Rotation is programmatic ON PURPOSE — swapping accounts by hand mid-demo is
+# exactly the kind of manual step that fails in front of an audience.
+_EXTRA_KEY_ENV_VARS = ("GEMINI_API_KEY_2", "GEMINI_API_KEY_3")
+
+
+def _available_api_keys(explicit_key: str | None = None) -> list[str]:
+    """Ordered, de-duplicated list of usable Gemini API keys.
+
+    An explicitly-passed key wins outright and is used alone — a caller that
+    named a key means it, and silently failing over to a different account
+    would make debugging a bad key deeply confusing.
+    """
+
+    if explicit_key:
+        return [explicit_key]
+
+    keys: list[str] = []
+    for var in ("GEMINI_API_KEY", *_EXTRA_KEY_ENV_VARS):
+        value = (os.environ.get(var) or "").strip()
+        if value and value not in keys:
+            keys.append(value)
+    return keys
+
+
 def _should_try_next_model(exc: Exception) -> bool:
     """True if `exc` is a per-model availability problem worth retrying on a
     different model, rather than a real error the caller must see.
@@ -136,38 +168,56 @@ def _should_try_next_model(exc: Exception) -> bool:
 
 
 def _generate_with_model_fallback(client, *, contents, config):
-    """Call `generate_content`, walking GEMINI_MODELS until one succeeds.
+    """Call `generate_content`, walking models and then API keys until one
+    succeeds.
 
-    Returns the raw SDK response. Raises the LAST failover error if every
-    model is unavailable, and re-raises immediately on any non-failover error
-    (see `_should_try_next_model`).
+    Order is models-within-key, then next key: exhaust every model on the
+    current account before switching accounts, so a single account's quota is
+    fully used before reaching for the next one.
+
+    `client` is used as-is for the first key — an injected client (tests, or a
+    caller that built its own) is always honoured. Additional keys only come
+    into play if that client's models are all exhausted AND extra keys are
+    configured.
+
+    Returns the raw SDK response. Re-raises immediately on any non-failover
+    error (see `_should_try_next_model`), and raises RuntimeError only once
+    every model on every key is unavailable.
     """
 
     last_error: Exception | None = None
+    keys = _available_api_keys()
+    # The passed-in client counts as attempt 1; extra keys build their own.
+    clients: list[tuple[str, object]] = [("primary", client)]
+    for index, key in enumerate(keys[1:], start=2):
+        clients.append((f"key #{index}", genai.Client(api_key=key)))
 
-    for model in GEMINI_MODELS:
-        try:
-            return client.models.generate_content(
-                model=model, contents=contents, config=config
-            )
-        except Exception as exc:  # noqa: BLE001 — re-raised below unless failover
-            if not _should_try_next_model(exc):
-                raise
-            last_error = exc
-            logger.warning(
-                "Gemini model %r unavailable (code %s) — falling back to the "
-                "next model in GEMINI_MODELS. Note that failed calls still "
-                "consume RPD quota.",
-                model,
-                getattr(exc, "code", "?"),
-            )
+    for key_label, active_client in clients:
+        for model in GEMINI_MODELS:
+            try:
+                return active_client.models.generate_content(
+                    model=model, contents=contents, config=config
+                )
+            except Exception as exc:  # noqa: BLE001 — re-raised unless failover
+                if not _should_try_next_model(exc):
+                    raise
+                last_error = exc
+                logger.warning(
+                    "Gemini model %r unavailable on %s (code %s) — trying the "
+                    "next model/key. Note that failed calls still consume RPD "
+                    "quota.",
+                    model,
+                    key_label,
+                    getattr(exc, "code", "?"),
+                )
 
     raise RuntimeError(
-        "Every model in GEMINI_MODELS was unavailable "
-        f"({', '.join(GEMINI_MODELS)}). The free tier allows only 20 requests "
-        "per day per model, so this most likely means the daily quota is "
-        "exhausted across all of them — check https://ai.dev/rate-limit. "
-        f"Last error: {last_error}"
+        f"Every model ({', '.join(GEMINI_MODELS)}) was unavailable across "
+        f"{len(clients)} API key(s). The free tier allows only 20 requests per "
+        "day per model per project, so this most likely means the daily quota "
+        "is exhausted everywhere — check https://ai.dev/rate-limit. Adding "
+        f"another key via {' or '.join(_EXTRA_KEY_ENV_VARS)} buys more "
+        f"headroom. Last error: {last_error}"
     ) from last_error
 
 
