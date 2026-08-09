@@ -8,27 +8,65 @@
  * whether the data is mocked or real, per agents/ui-agent.md ("Never
  * touches: any backend/API logic").
  *
- * Being rebuilt screen by screen alongside app.js (see CLAUDE.md's agent
- * loop). Scene paper generation, usage-gate mutation, etc. get added here
- * when those screens are specced.
- *
- * TO SWAP IN THE REAL API LATER:
- *   1. Flip USE_MOCK_DATA to false below.
- *   2. Fill in the fetch() calls in the "real" branch of each function.
- *   3. Nothing in app.js needs to change — it already awaits these functions
- *      and renders whatever shape comes back.
+ * The real backend is now live (see ai-docs/plan.md) — USE_MOCK_DATA
+ * defaults to false. Flip it to true (or append ?mock=1) as demo insurance
+ * if the backend is down; every mock code path below is still fully intact.
  */
 
-const USE_MOCK_DATA = true; // <-- flip this when the real backend is live
+// Base URL in one overridable place, per the plan — set
+// window.SCENEPAPER_API_BASE_URL before this script loads to point
+// elsewhere (e.g. a local dev backend) without editing this file.
+const API_BASE_URL =
+  window.SCENEPAPER_API_BASE_URL ||
+  "https://scenepaper-60081628315.development.catalystserverless.in";
 
-// ?searchfailed=1 forces every searchCandidates() call to reject, so the
-// Screen 2 failed-state can be reviewed/demoed without code changes.
-const SIMULATE_SEARCH_FAILURE = new URLSearchParams(window.location.search).has(
-  "searchfailed"
-);
+const params = new URLSearchParams(window.location.search);
+const USE_MOCK_DATA = params.has("mock") || false; // <-- demo-insurance override
+
+// ?searchfailed=1 / ?generatefailed=1 force those calls to reject even in
+// mock mode, so the Screen 2 / progress failed-states can be reviewed
+// without code changes.
+const SIMULATE_SEARCH_FAILURE = params.has("searchfailed");
+const SIMULATE_GENERATE_FAILURE = params.has("generatefailed");
 
 function withLatency(value, ms = 400) {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
+
+async function safeJson(res) {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+// The backend's error envelope is consistently {status:"error", message}
+// across 400/404/502/503 (see ai-docs/plan.md) — surface the real message
+// instead of a generic "request failed".
+function backendErrorMessage(body, status) {
+  if (body && typeof body.message === "string" && body.message) return body.message;
+  return `Request failed (HTTP ${status})`;
+}
+
+// The real /ideate response is missing several fields the UI expects
+// (score_tag, source_count, angle_type, era, candidate_id) while
+// api-integration-agent is still building it out, and confidence_score is
+// currently always null. Normalize defensively so the UI renders an honest
+// "not yet scored" state instead of crashing or lying with a fake band —
+// per the plan, these fields "simply become good data" once the real
+// pipeline lands, with no UI change needed then.
+function normalizeCandidate(raw, index) {
+  return {
+    ...raw,
+    candidate_id: raw.candidate_id || `cand_${index}`,
+    score: raw.score ?? raw.confidence_score ?? null,
+    score_tag: raw.score_tag ?? null,
+    flags: raw.flags || [],
+    source_count: raw.source_count ?? null,
+    angle_type: raw.angle_type ?? null,
+    era: raw.era ?? null,
+  };
 }
 
 // UserProfile is lightweight/effectively single-user for the hackathon demo.
@@ -39,17 +77,17 @@ const sessionState = {
 
 /**
  * getUsageStatus() -> Promise<{ scenepapers_generated_count, free_limit }>
- * Mirrors the MCP tool get_usage_status(user_id).
+ * Mirrors the MCP tool get_usage_status(user_id). There's no real
+ * usage-status route in ai-docs/plan.md's backend table yet, so this stays
+ * on local mock state regardless of USE_MOCK_DATA — not gated by the flag,
+ * because there's nothing real to gate to.
  */
 async function getUsageStatus() {
-  if (USE_MOCK_DATA) {
-    return withLatency({ ...sessionState });
-  }
-  // --- real API swap point ---
-  // const res = await fetch(`/api/usage-status`);
+  // --- real API swap point (once a route exists) ---
+  // const res = await fetch(`${API_BASE_URL}/usage-status`);
   // if (!res.ok) throw new Error(`usage-status failed: ${res.status}`);
   // return res.json();
-  throw new Error("Real API not wired up yet — set USE_MOCK_DATA = true.");
+  return withLatency({ ...sessionState });
 }
 
 // ---------------------------------------------------------------------------
@@ -266,15 +304,28 @@ async function searchCandidates({ topic, hint = null, excludeAngleTypes = [] }) 
       message: `I've covered the strong angles here for "${t}" — want to broaden the topic or try a different framing instead?`,
     });
   }
-  // --- real API swap point ---
-  // const res = await fetch(`/api/ideate`, {
-  //   method: "POST",
-  //   headers: { "Content-Type": "application/json" },
-  //   body: JSON.stringify({ topic, hint, exclude_angle_types: excludeAngleTypes }),
-  // });
-  // if (!res.ok) throw new Error(`ideate failed: ${res.status}`);
-  // return res.json();
-  throw new Error("Real API not wired up yet — set USE_MOCK_DATA = true.");
+
+  // Real backend. Only `topic` is in the documented /ideate contract right
+  // now (see ai-docs/plan.md) — hint/exclude_angle_types are sent anyway as
+  // forward-looking extras the backend can adopt later; harmless if ignored
+  // today. There's no suppressed/axis/exhausted concept in the real
+  // response yet, so those default to "nothing suppressed" / "events" /
+  // "not exhausted" until api-integration-agent adds them.
+  const res = await fetch(`${API_BASE_URL}/ideate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic: t, hint, exclude_angle_types: excludeAngleTypes }),
+  });
+  const body = await safeJson(res);
+  if (!res.ok || (body && body.status === "error")) {
+    throw new Error(backendErrorMessage(body, res.status));
+  }
+  return {
+    topic: (body && body.topic) || t,
+    axis: (body && body.axis) || "events",
+    candidates: ((body && body.candidates) || []).map((c, i) => normalizeCandidate(c, i)),
+    suppressed: (body && body.suppressed) || [],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -305,18 +356,23 @@ async function searchCandidates({ topic, hint = null, excludeAngleTypes = [] }) 
 // than fake a photo — see app.js's renderSceneImage, which no longer has a
 // "has an image" branch at all.
 
-const FORCED_MEDIA_STATE = new URLSearchParams(window.location.search).get("media");
+const FORCED_MEDIA_STATE = params.get("media");
 
 function span(text, verified) {
   return { text, verified };
 }
 
-async function generateScenePaper({ candidate, topic }) {
-  if (USE_MOCK_DATA) {
-    const mediaStatus = FORCED_MEDIA_STATE || "ready";
-    const t = topic && topic.trim() ? topic.trim() : "this story";
+// In-memory store for mock-mode "generated" papers, keyed by the synthetic
+// paper_id startGeneration() hands back — lets getPaper() honor the same
+// start-then-poll contract the real backend uses, without actually needing
+// multiple polls in mock mode.
+const mockPapersById = new Map();
 
-    const paper = {
+function buildMockPaper({ candidate, topic }) {
+  const mediaStatus = FORCED_MEDIA_STATE || "ready";
+  const t = topic && topic.trim() ? topic.trim() : "this story";
+
+  return {
       id: `sp_${candidate.candidate_id || "mock"}`,
       paper_number: "041",
       title: `The untold turn behind ${t}`,
@@ -506,19 +562,63 @@ async function generateScenePaper({ candidate, topic }) {
       media_status: mediaStatus,
       export_status: "locked",
       created_at: new Date().toISOString(),
-    };
+  };
+}
 
-    return withLatency(paper, 700);
+/**
+ * startGeneration({ candidate, topic }) -> Promise<{ paper_id }>
+ * Mirrors POST /generate. This is asynchronous on the real backend — it
+ * returns as soon as the job is *accepted*, not once the paper exists.
+ * getPaper() below is how the caller finds out when it's actually ready.
+ */
+async function startGeneration({ candidate, topic }) {
+  if (USE_MOCK_DATA) {
+    if (SIMULATE_GENERATE_FAILURE) {
+      await withLatency(null, 500);
+      throw new Error("generation backend unreachable");
+    }
+    const paperId = `mock_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    mockPapersById.set(paperId, buildMockPaper({ candidate, topic }));
+    await withLatency(null, 700); // same "it takes a moment" feel the old mock had
+    return { paper_id: paperId };
   }
-  // --- real API swap point ---
-  // const res = await fetch(`/api/generate`, {
-  //   method: "POST",
-  //   headers: { "Content-Type": "application/json" },
-  //   body: JSON.stringify({ candidate_id: candidate.candidate_id }),
-  // });
-  // if (!res.ok) throw new Error(`generate failed: ${res.status}`);
-  // return res.json();
-  throw new Error("Real API not wired up yet — set USE_MOCK_DATA = true.");
+
+  const res = await fetch(`${API_BASE_URL}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic, candidate }),
+  });
+  const body = await safeJson(res);
+  if (res.status !== 202) {
+    throw new Error(backendErrorMessage(body, res.status));
+  }
+  return { paper_id: body && body.paper_id };
+}
+
+/**
+ * getPaper(paperId) -> Promise<paper | null>
+ * Mirrors GET /paper?id=<paper_id> — NOTE the query param, not a path
+ * segment; the API Gateway rewrites each route to a fixed path and can't
+ * carry a per-request id any other way (see ai-docs/plan.md).
+ *
+ * Resolves `null` while the paper doesn't exist yet (confirmed empirically:
+ * the real backend returns 404 + {status:"error"} during generation, not
+ * just once something has actually gone wrong) — the caller polls on that.
+ * Throws for any other non-OK status, since those are real failures, not
+ * "still working".
+ */
+async function getPaper(paperId) {
+  if (USE_MOCK_DATA) {
+    return mockPapersById.get(paperId) || null;
+  }
+
+  const res = await fetch(`${API_BASE_URL}/paper?id=${encodeURIComponent(paperId)}`);
+  if (res.status === 404) return null;
+  const body = await safeJson(res);
+  if (!res.ok) {
+    throw new Error(backendErrorMessage(body, res.status));
+  }
+  return body;
 }
 
 // Exposed as a plain global object — no bundler/module step, per CLAUDE.md's
@@ -527,5 +627,6 @@ window.ScenePaperMockApi = {
   USE_MOCK_DATA,
   getUsageStatus,
   searchCandidates,
-  generateScenePaper,
+  startGeneration,
+  getPaper,
 };

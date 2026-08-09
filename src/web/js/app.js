@@ -43,8 +43,6 @@
     form: document.getElementById("topic-form"),
     textarea: document.getElementById("topic-input"),
     fieldError: document.getElementById("topic-error"),
-    submitButton: document.getElementById("topic-submit"),
-    status: document.getElementById("topic-status"),
     settingsButton: document.getElementById("settings-button"),
     // Screen 2
     viewCandidates: document.getElementById("view-candidates"),
@@ -186,7 +184,21 @@
 
   const api = window.ScenePaperMockApi;
 
+  // Honest label reflecting which backend is actually live — this used to
+  // hardcode "USE_MOCK_DATA = true", which silently went stale (and lied)
+  // the moment the flag's default flipped to false.
+  const dataSourceNoteEl = document.getElementById("data-source-note");
+  dataSourceNoteEl.innerHTML = api.USE_MOCK_DATA
+    ? `Mock data (<code>?mock=1</code>) — see <code>src/web/js/mockApi.js</code>.`
+    : `Live backend — append <code>?mock=1</code> to force mock data.`;
+
+  // "unscored" — not one of the real verification bands — is a genuine
+  // state, not an error: the live /ideate endpoint currently returns
+  // confidence_score: null for every candidate (api-integration-agent is
+  // still wiring up real scoring). Falling through to "danger" would lie —
+  // it'd paint an un-scored candidate the same red as a genuinely bad one.
   function scoreBand(score) {
+    if (score === null || score === undefined) return "unscored";
     if (score >= 7) return "success";
     if (score >= 4) return "warning";
     return "danger";
@@ -194,17 +206,35 @@
 
   function renderCandidateCard(c) {
     const band = scoreBand(c.score);
+    const scoreHtml =
+      band === "unscored"
+        ? `<span class="candidate-score-unscored">not yet scored</span>`
+        : `<span class="candidate-score-number">${escapeHtml(c.score)}</span><span class="candidate-score-max">/10</span>`;
+
+    const metaParts = [];
+    if (c.source_count !== null && c.source_count !== undefined) {
+      metaParts.push(
+        `<span class="meta-sources">${ICON_DOCUMENT}${c.source_count} source${c.source_count === 1 ? "" : "s"}</span>`
+      );
+    }
+    const angleEra = [c.angle_type, c.era].filter(Boolean).join(" · ");
+    if (angleEra) {
+      metaParts.push(`<span class="meta-angle">${escapeHtml(angleEra)}</span>`);
+    }
+
     return `
       <button type="button" class="candidate-card" data-candidate-id="${escapeHtml(c.candidate_id)}">
         <div class="candidate-card-main">
           <p class="candidate-one-liner">${escapeHtml(c.one_liner)}</p>
-          <div class="candidate-score score-${band}">
-            <span class="candidate-score-number">${escapeHtml(c.score)}</span><span class="candidate-score-max">/10</span>
-          </div>
+          <div class="candidate-score score-${band}">${scoreHtml}</div>
         </div>
-        <div class="candidate-pills">
-          <span class="pill pill-score-tag score-${band}">${escapeHtml(c.score_tag)}</span>
-        </div>
+        ${
+          c.score_tag
+            ? `<div class="candidate-pills">
+                <span class="pill pill-score-tag score-${band}">${escapeHtml(c.score_tag)}</span>
+              </div>`
+            : ""
+        }
         ${
           c.flags.length
             ? `<div class="candidate-pills">
@@ -214,11 +244,11 @@
               </div>`
             : ""
         }
-        <hr class="candidate-divider" />
-        <div class="candidate-meta">
-          <span class="meta-sources">${ICON_DOCUMENT}${c.source_count} source${c.source_count === 1 ? "" : "s"}</span>
-          <span class="meta-angle">${escapeHtml(c.angle_type)} · ${escapeHtml(c.era)}</span>
-        </div>
+        ${
+          metaParts.length
+            ? `<hr class="candidate-divider" /><div class="candidate-meta">${metaParts.join("")}</div>`
+            : ""
+        }
       </button>
     `;
   }
@@ -410,11 +440,18 @@
   // ==========================================================================
   //
   // Sits between picking a candidate and Scene Paper View. The step list is
-  // a visual pace-setter, not a progress bar tied to real sub-request
-  // timing — api.generateScenePaper() is one call, not five. Both the step
-  // animation and the real fetch run concurrently; the screen advances to
-  // Scene Paper View only once both are done, so the steps never outrun
-  // (or lag badly behind) the actual generation call.
+  // a visual pace-setter over ONE real async call, not five observable
+  // phases — POST /generate returns as soon as the job is accepted (202),
+  // long before the paper exists, so this screen owns the poll loop against
+  // GET /paper?id= until it does. The first N-1 steps advance on a fixed,
+  // fast cadence purely to establish visible motion; the LAST step stays in
+  // its "active" (spinning) state for as long as polling actually takes —
+  // which, per real testing, can run well past the documented 15-30s — so a
+  // slow real run never reads as a stalled one.
+
+  const GENERATION_POLL_INTERVAL_MS = 3000;
+  const GENERATION_POLL_TIMEOUT_MS = 90000;
+  const GENERATION_REASSURANCE_AFTER_MS = 15000;
 
   const PROGRESS_STEPS = [
     { label: "Searching sources" },
@@ -468,39 +505,54 @@
     });
   }
 
+  function showProgressReassurance() {
+    if (document.getElementById("progress-reassurance")) return;
+    els.progressSteps.insertAdjacentHTML(
+      "beforeend",
+      `<p class="progress-reassurance" id="progress-reassurance">Generation can take a while for a new topic — this is still working.</p>`
+    );
+  }
+
+  // Polls GET /paper?id= until it resolves (api.getPaper returns the paper),
+  // times out, or throws (a real backend error — not just "not ready yet",
+  // which getPaper already represents as null rather than a rejection).
+  async function pollForPaper(paperId) {
+    const deadline = Date.now() + GENERATION_POLL_TIMEOUT_MS;
+    const reassuranceAt = Date.now() + GENERATION_REASSURANCE_AFTER_MS;
+    for (;;) {
+      const paper = await api.getPaper(paperId);
+      if (paper) return paper;
+      if (Date.now() >= reassuranceAt) showProgressReassurance();
+      if (Date.now() >= deadline) {
+        throw new Error(
+          "Generation is taking longer than expected. It may still finish in the background — try checking back, or try again."
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, GENERATION_POLL_INTERVAL_MS));
+    }
+  }
+
   async function runGenerationProgress(candidate) {
     els.progressOneLiner.textContent = candidate.one_liner;
     showView("progress");
 
     const stepDelay = prefersReducedMotion() ? 80 : 600;
-    let stepIndex = 0;
-    renderProgressSteps(stepIndex);
-
-    const stepTimer = new Promise((resolve) => {
-      function tick() {
-        stepIndex++;
-        renderProgressSteps(stepIndex);
-        if (stepIndex >= PROGRESS_STEPS.length) {
-          resolve();
-        } else {
-          setTimeout(tick, stepDelay);
-        }
-      }
-      setTimeout(tick, stepDelay);
-    });
-
-    const fetchPromise = api
-      .generateScenePaper({ candidate, topic: currentTopic })
-      .catch((err) => ({ __error: err }));
-
-    const [, fetchResult] = await Promise.all([stepTimer, fetchPromise]);
-
-    if (fetchResult && fetchResult.__error) {
-      renderProgressFailed(fetchResult.__error, candidate);
-      return;
+    const introSteps = PROGRESS_STEPS.length - 1;
+    renderProgressSteps(0);
+    for (let i = 0; i < introSteps; i++) {
+      await new Promise((resolve) => setTimeout(resolve, stepDelay));
+      renderProgressSteps(i + 1);
     }
+    // Last step ("Matching images") is now "active" and stays that way —
+    // rendered once above, not touched again until we leave this screen.
 
-    showScenePaper(fetchResult);
+    try {
+      const { paper_id } = await api.startGeneration({ candidate, topic: currentTopic });
+      const paper = await pollForPaper(paper_id);
+      showScenePaper(paper);
+    } catch (err) {
+      renderProgressFailed(err, candidate);
+    }
   }
 
   // ==========================================================================

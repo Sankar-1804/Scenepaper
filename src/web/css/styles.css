@@ -504,6 +504,15 @@ body.app-revealed .pre-reveal {
   color: var(--score-danger-text);
 }
 
+/* Not a real band — "hasn't been scored yet" is a distinct, honest state
+   from a genuinely low score, and must not read as one (see scoreBand() in
+   app.js). Muted, no color, deliberately unremarkable. */
+.candidate-score-unscored {
+  font-size: 0.78rem;
+  font-style: italic;
+  color: var(--color-muted);
+}
+
 .candidate-pills {
   display: flex;
   flex-wrap: wrap;
@@ -774,6 +783,13 @@ body.app-revealed .pre-reveal {
 .progress-step-label.is-current,
 .progress-step-label.is-complete {
   color: var(--color-text);
+}
+
+.progress-reassurance {
+  margin: 1.25rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.85rem;
+  font-style: italic;
 }
 
 /* ==========================================================================
