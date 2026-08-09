@@ -25,6 +25,7 @@ functions/scenepaper_pipeline/main.py for the full encoding reference.
 
 import json
 import logging
+import os
 
 import zcatalyst_sdk
 from zcatalyst_sdk.nosql.transfom import Item as _NoSqlItem
@@ -33,6 +34,36 @@ from backend.clients.gemini_client import SourceMaterial
 from backend.orchestrator import Candidate, generate_scene_paper
 
 logger = logging.getLogger()
+
+# Catalyst Functions have no environment variables. API keys live in Catalyst
+# Cache (seeded once manually via the Console: key = 'GEMINI_API_KEY', etc.)
+# and are read here at handler start. os.environ fallback keeps local dev
+# working via a .env loaded before the process starts.
+_GEMINI_KEY_VARS = ("GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3")
+
+
+def _seed_api_keys_from_cache(app) -> None:
+    """Read Gemini API keys from Catalyst Cache into os.environ.
+
+    Only writes keys that aren't already set (env takes precedence for local
+    dev). Logs a warning if GEMINI_API_KEY itself is missing after the attempt
+    since gemini_client will fail silently if no key is present.
+    """
+    cache = app.cache().segment()
+    for var in _GEMINI_KEY_VARS:
+        if os.environ.get(var):
+            continue  # already set (local dev / CI)
+        try:
+            value = (cache.get_value(var) or "").strip()
+            if value:
+                os.environ[var] = value
+        except Exception:
+            pass  # key simply not in Cache yet -- that's fine for _2/_3
+    if not os.environ.get("GEMINI_API_KEY"):
+        logger.warning(
+            "GEMINI_API_KEY not found in env or Catalyst Cache -- "
+            "seed it via the Console: Cache > default segment > key=GEMINI_API_KEY"
+        )
 
 
 def _build_candidate(candidate_dict: dict) -> Candidate:
@@ -124,6 +155,15 @@ def _stage_write_scenepaper(
 
 def handler(job_request, context):
     logger = logging.getLogger()
+
+    # Seed thread-local Catalyst credentials from the job request headers,
+    # exactly like the Advanced I/O function does with its HTTP request.
+    # Without this, zcatalyst_sdk.initialize() raises "Catalyst headers are empty"
+    # when _stage_write_scenepaper tries to write to NoSQL.
+    app = zcatalyst_sdk.initialize(req=job_request)
+
+    # Catalyst Functions have no env vars -- read Gemini API key(s) from Cache.
+    _seed_api_keys_from_cache(app)
 
     all_params = job_request.get_all_job_params()
     logger.info("scenepaper_pipeline_job started, params=%s", all_params)

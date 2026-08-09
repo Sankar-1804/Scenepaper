@@ -212,12 +212,25 @@ class _FakeNoSQLService:
         return _FakeNoSQLTable(self._store)
 
 
+class _FakeCacheSegment:
+    def get_value(self, key):
+        return None  # no keys seeded in tests; _seed_api_keys_from_cache swallows None
+
+
+class _FakeCacheService:
+    def segment(self, seg_id=None):
+        return _FakeCacheSegment()
+
+
 class _FakeApp:
     def __init__(self, store):
         self._store = store
 
     def nosql(self):
         return _FakeNoSQLService(self._store)
+
+    def cache(self):
+        return _FakeCacheService()
 
     def job_scheduling(self):
         # Raises so POST /generate falls through to the 502 path, matching
