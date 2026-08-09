@@ -236,6 +236,58 @@ def _submit_pipeline_job(job_params: dict, request: Request = None) -> dict:
 
 
 # --------------------------------------------------------------------------
+# NoSQL write probe -- TEMPORARY (work item 2 / plan.md)
+#
+# Hit GET /probe-nosql on the deployed function to verify the insert/update/
+# delete path works end-to-end against the real Catalyst NoSQL table.
+# Key question: does update_value: {'value': v} accept non-scalar Python
+# values (lists, dicts) or do they need DynamoDB-encoded types?
+# Remove this endpoint and its routing line once the answer is confirmed.
+# --------------------------------------------------------------------------
+
+def _handle_probe_nosql():
+    probe_id = "probe-" + uuid.uuid4().hex[:8]
+    results = {}
+    try:
+        probe_doc = {
+            'id': probe_id,
+            'title': 'probe-insert',
+            'category': 'curious',
+            'scalar_field': 'hello',
+            'list_field': ['a', 'b', 'c'],
+            'dict_field': {'nested_key': 'nested_val'},
+        }
+        _create_scenepaper(probe_doc)
+        results['insert'] = 'ok'
+
+        results['fetch_after_insert'] = _get_scenepaper(probe_id)
+
+        _update_scenepaper(probe_id, {'scalar_field': 'updated-scalar'})
+        results['fetch_after_scalar_update'] = _get_scenepaper(probe_id)
+
+        _update_scenepaper(probe_id, {'list_field': ['x', 'y']})
+        results['fetch_after_list_update'] = _get_scenepaper(probe_id)
+
+        _update_scenepaper(probe_id, {'dict_field': {'new_key': 'new_val'}})
+        results['fetch_after_dict_update'] = _get_scenepaper(probe_id)
+
+    except Exception as exc:
+        results['error'] = f"{type(exc).__name__}: {exc}"
+    finally:
+        try:
+            _delete_scenepaper(probe_id)
+            results['cleanup'] = 'deleted'
+        except Exception as exc:
+            results['cleanup'] = f"failed: {exc}"
+
+    return _json_response(200, {
+        'status': 'probe',
+        'probe_id': probe_id,
+        'results': results,
+    })
+
+
+# --------------------------------------------------------------------------
 # Route handlers
 # --------------------------------------------------------------------------
 
@@ -375,6 +427,9 @@ def handler(request: Request):
 
     if path == "/ideate" and method == "POST":
         return _handle_ideate(request)
+
+    if path == "/probe-nosql" and method == "GET":  # TEMPORARY -- remove after work item 2
+        return _handle_probe_nosql()
 
     if path == "/generate" and method == "POST":
         return _handle_generate(request)
