@@ -6,12 +6,13 @@ key-based auth, generous free rate limit, good per-keyword search). Real
 stock photos only — Tier 1 explicitly rules out AI-generated imagery
 ("too unreliable for a live demo on this timeline").
 
-# TODO(issue #10): a Pexels developer key was never obtained (see
-# docs/api-notes.md, "Status: Decided, not yet integrated"). PEXELS_API_KEY
-# is read from the environment below but will be empty until a real key is
-# generated and placed in .env — every real call will fail with a 401 until
-# then. The client shape itself (endpoint, params, response parsing) is
-# written against Pexels' real, documented API.
+Live-confirmed 2026-08-09 (ai-docs/plan.md): Pexels' `/v1/search` endpoint
+returns real results with NO `Authorization` header at all, and even with a
+bogus one -- both return 200 with genuine photo data, not a 401. A real
+`PEXELS_API_KEY` is still configured and sent when present (a future rate
+limit or endpoint may require it), but the client does not depend on it to
+function today, and nothing here should assume a missing/invalid key means
+failure.
 """
 
 from __future__ import annotations
@@ -49,22 +50,18 @@ class PexelsClient:
         self.api_key = api_key or os.environ.get(PEXELS_API_KEY_ENV_VAR)
         self.timeout = timeout
         if not self.api_key:
-            logger.warning(
-                "%s is not set — Pexels calls will fail (401) until a real "
-                "key is obtained and placed in .env. See docs/api-notes.md.",
+            logger.info(
+                "%s is not set — proceeding without it. Live-confirmed "
+                "2026-08-09: Pexels' search endpoint returns real results "
+                "even with no Authorization header, so this is not expected "
+                "to fail. See docs/api-notes.md.",
                 PEXELS_API_KEY_ENV_VAR,
             )
 
     def search_images_for_scene(
         self, keyword: str, per_page: int = 3
     ) -> list[PexelsImage]:
-        """Search for stock photos matching a scene's keyword.
-
-        # TODO(issue #10): no API key yet — this call is real but cannot
-        # succeed tonight. Once a key exists, this should just work as
-        # written; verify the response shape against a live call before
-        # trusting it in the demo.
-        """
+        """Search for stock photos matching a scene's keyword."""
 
         headers = {"Authorization": self.api_key or ""}
         params = {"query": keyword, "per_page": per_page}

@@ -1,35 +1,121 @@
 /**
  * app.js
  * ------
- * Rendering + view logic only. Every piece of data comes from
+ * Rendering + view logic only. Every piece of backend-shaped data comes from
  * window.ScenePaperMockApi (see mockApi.js) — this file never fetches
- * anything itself and never touches backend/API logic, per agents/ui-agent.md
- * ("Never touches: Any backend/API logic — this agent renders whatever JSON
- * the Python API returns").
+ * anything itself, per agents/ui-agent.md ("Never touches: any backend/API
+ * logic — this agent renders whatever JSON the Python API returns").
  *
- * No framework, no build step — plain DOM + template strings, per CLAUDE.md.
+ * Screens: Topic input, Candidate selection, Generation progress, Scene
+ * paper view, Scene detail. No framework, no build step, per CLAUDE.md.
+ * There's no client-side router — every screen lives in this one page,
+ * toggled via showView().
+ *
+ * Icons are inline SVG (not the design handoff's Phosphor-via-CDN) and type
+ * stays on the system font stack (not Google Fonts Inter) — deliberate, so
+ * the app has no network dependency for a live demo. See Design README.md
+ * for the palette these colors come from.
  */
 
 (function () {
-  const api = window.ScenePaperMockApi;
+  // Screen 2's suppressed-candidates section is a dev/demo-only transparency
+  // aid (see CLAUDE.md's trust model) — flip this off for a production
+  // build rather than deleting the section outright.
+  const SHOW_SUPPRESSED_DEV_SECTION = true;
+
+  const ICON_WARNING = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5 15 14H1L8 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.2v3.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.6" r="0.9" fill="currentColor"/></svg>`;
+  const ICON_DOCUMENT = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="1.5" width="10" height="13" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 5h5M5.5 8h5M5.5 11h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
+  const ICON_REFRESH = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13.5 8A5.5 5.5 0 1 1 11.8 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M13.5 2.5v3.5H10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const ICON_SLIDERS = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="6" cy="4.5" r="1.4" fill="var(--color-bg)" stroke="currentColor" stroke-width="1.2"/><circle cx="11" cy="8" r="1.4" fill="var(--color-bg)" stroke="currentColor" stroke-width="1.2"/><circle cx="5" cy="11.5" r="1.4" fill="var(--color-bg)" stroke="currentColor" stroke-width="1.2"/></svg>`;
+  const ICON_EYE_SLASH = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 8s2.4-4.5 6-4.5S14 8 14 8s-2.4 4.5-6 4.5S2 8 2 8Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="8" cy="8" r="1.8" stroke="currentColor" stroke-width="1.3"/><path d="M2.5 2.5l11 11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`;
+  const ICON_X_CIRCLE = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.3"/><path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`;
+  const ICON_SHIELD_CHECK = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5 13.5 3.5v4c0 4-2.4 6.2-5.5 7-3.1-0.8-5.5-3-5.5-7v-4L8 1.5Z" fill="currentColor" opacity="0.15" stroke="currentColor" stroke-width="1.2"/><path d="M5.5 8 7.3 9.8 10.5 6.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const ICON_LOCK = `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.3" stroke="currentColor" stroke-width="1.3"/><path d="M5.3 7V5a2.7 2.7 0 0 1 5.4 0v2" stroke="currentColor" stroke-width="1.3"/></svg>`;
+  const ICON_ARROW_LEFT = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13 8H3M6.5 3.5 3 8l3.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const ICON_ARROW_RIGHT = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9.5 3.5 13 8l-3.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const ICON_CIRCLE_DASHED = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2.4 2.4"/></svg>`;
+  const ICON_CIRCLE_NOTCH = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M14 8A6 6 0 1 1 8 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+  const ICON_CHECK_CIRCLE_FILL = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.3" fill="currentColor"/><path d="M5.3 8.2 7.2 10 10.7 6" stroke="var(--color-bg)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
   const els = {
-    usageWidget: document.getElementById("usage-widget"),
+    // Screen 1
     viewTopic: document.getElementById("view-topic"),
-    viewPaper: document.getElementById("view-paper"),
-    topicForm: document.getElementById("topic-form"),
-    topicInput: document.getElementById("topic-input"),
-    topicSubmit: document.getElementById("topic-submit"),
-    topicStatus: document.getElementById("topic-status"),
+    form: document.getElementById("topic-form"),
+    textarea: document.getElementById("topic-input"),
+    fieldError: document.getElementById("topic-error"),
+    settingsButton: document.getElementById("settings-button"),
+    // Screen 2
+    viewCandidates: document.getElementById("view-candidates"),
+    topicRecapText: document.getElementById("topic-recap-text"),
+    changeTopicButton: document.getElementById("change-topic-button"),
+    candidatesUsage: document.getElementById("candidates-usage"),
+    resultContext: document.getElementById("result-context"),
     candidateList: document.getElementById("candidate-list"),
-    backButton: document.getElementById("back-to-candidates"),
-    paperStatus: document.getElementById("paper-status"),
-    paperDetail: document.getElementById("paper-detail"),
+    candidateActions: document.getElementById("candidate-actions"),
+    showMoreButton: document.getElementById("show-more-button"),
+    narrowButton: document.getElementById("narrow-button"),
+    narrowInputRow: document.getElementById("narrow-input-row"),
+    narrowInput: document.getElementById("narrow-input"),
+    narrowSubmit: document.getElementById("narrow-submit"),
+    suppressedSection: document.getElementById("suppressed-dev-section"),
+    suppressedHeader: document.getElementById("suppressed-header"),
+    suppressedList: document.getElementById("suppressed-list"),
+    // Generation progress
+    viewProgress: document.getElementById("view-progress"),
+    progressOneLiner: document.getElementById("progress-one-liner"),
+    progressSteps: document.getElementById("progress-steps"),
+    // Screen 3
+    viewPaper: document.getElementById("view-paper"),
+    backToCandidatesButton: document.getElementById("back-to-candidates-button"),
+    paperNumber: document.getElementById("paper-number"),
+    paperCategory: document.getElementById("paper-category"),
+    paperTitle: document.getElementById("paper-title"),
+    paperDek: document.getElementById("paper-dek"),
+    verificationBadge: document.getElementById("verification-badge"),
+    audioPlayer: document.getElementById("audio-player"),
+    hookList: document.getElementById("hook-list"),
+    timingGrid: document.getElementById("timing-grid"),
+    sceneRows: document.getElementById("scene-rows"),
+    sourceRows: document.getElementById("source-rows"),
+    exportRow: document.getElementById("export-row"),
+    // Screen 4
+    viewScene: document.getElementById("view-scene"),
+    sceneBackButton: document.getElementById("scene-back-button"),
+    sceneNumberLabel: document.getElementById("scene-number-label"),
+    scenePacingPillWrap: document.getElementById("scene-pacing-pill-wrap"),
+    sceneTimeRange: document.getElementById("scene-time-range"),
+    sceneTitleText: document.getElementById("scene-title-text"),
+    sceneAudioPlayer: document.getElementById("scene-audio-player"),
+    scriptMeta: document.getElementById("script-meta"),
+    scriptLines: document.getElementById("script-lines"),
+    claimsList: document.getElementById("claims-list"),
+    sceneImageBlock: document.getElementById("scene-image-block"),
+    scenePrevButton: document.getElementById("scene-prev-button"),
+    sceneNextButton: document.getElementById("scene-next-button"),
   };
 
-  let currentPaper = null;
+  // Static icon+text labels for buttons that never change their content —
+  // set once here instead of re-rendered every time their screen paints.
+  els.showMoreButton.innerHTML = `${ICON_REFRESH}Show me more`;
+  els.narrowButton.innerHTML = `${ICON_SLIDERS}Narrow it down`;
+  els.backToCandidatesButton.innerHTML = `${ICON_ARROW_LEFT}back to candidates`;
+  els.sceneBackButton.innerHTML = `${ICON_ARROW_LEFT}back to scene paper`;
+  els.scenePrevButton.innerHTML = `${ICON_ARROW_LEFT}previous scene`;
+  els.sceneNextButton.innerHTML = `next scene${ICON_ARROW_RIGHT}`;
 
-  // ---- small helpers --------------------------------------------------
+  // Screen 2 state — grows each round so mock/real search can avoid
+  // resurfacing the same angles (the addendum's already_surfaced[...]).
+  let currentTopic = "";
+  let excludeAngleTypes = [];
+  let lastSearchParams = null; // for the failed-state "try again" button
+
+  function showView(name) {
+    els.viewTopic.hidden = name !== "topic";
+    els.viewCandidates.hidden = name !== "candidates";
+    els.viewProgress.hidden = name !== "progress";
+    els.viewPaper.hidden = name !== "paper";
+    els.viewScene.hidden = name !== "scene";
+  }
 
   function escapeHtml(str) {
     if (str === null || str === undefined) return "";
@@ -38,6 +124,611 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  // ---- auto-growing textarea ----
+
+  function autoGrow() {
+    els.textarea.style.height = "auto";
+    els.textarea.style.height = els.textarea.scrollHeight + "px";
+  }
+
+  els.textarea.addEventListener("input", () => {
+    autoGrow();
+    clearFieldError();
+  });
+
+  // ---- submit handling ----
+
+  function clearFieldError() {
+    els.fieldError.hidden = true;
+    els.fieldError.textContent = "";
+  }
+
+  function showFieldError(message) {
+    els.fieldError.hidden = false;
+    els.fieldError.textContent = message;
+  }
+
+  async function submitTopic(topic) {
+    const trimmed = (topic || "").trim();
+    if (!trimmed) {
+      showFieldError("Enter a topic to get started.");
+      return;
+    }
+    clearFieldError();
+
+    currentTopic = trimmed;
+    excludeAngleTypes = [];
+    els.topicRecapText.textContent = trimmed;
+    els.narrowInputRow.hidden = true;
+    els.narrowInput.value = "";
+
+    showView("candidates");
+    renderCandidatesUsage();
+    runSearch({ topic: trimmed });
+  }
+
+  els.form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitTopic(els.textarea.value);
+  });
+
+  els.settingsButton.addEventListener("click", () => {
+    console.info("[stub] settings screen not built yet");
+  });
+
+  // ==========================================================================
+  // Screen 2: Candidate selection
+  // ==========================================================================
+
+  const api = window.ScenePaperMockApi;
+
+  // Honest label reflecting which backend is actually live — this used to
+  // hardcode "USE_MOCK_DATA = true", which silently went stale (and lied)
+  // the moment the flag's default flipped to false.
+  const dataSourceNoteEl = document.getElementById("data-source-note");
+  dataSourceNoteEl.innerHTML = api.USE_MOCK_DATA
+    ? `Mock data (<code>?mock=1</code>) — see <code>src/web/js/mockApi.js</code>.`
+    : `Live backend — append <code>?mock=1</code> to force mock data.`;
+
+  // "unscored" — not one of the real verification bands — is a genuine
+  // state, not an error: the live /ideate endpoint currently returns
+  // confidence_score: null for every candidate (api-integration-agent is
+  // still wiring up real scoring). Falling through to "danger" would lie —
+  // it'd paint an un-scored candidate the same red as a genuinely bad one.
+  function scoreBand(score) {
+    if (score === null || score === undefined) return "unscored";
+    if (score >= 7) return "success";
+    if (score >= 4) return "warning";
+    return "danger";
+  }
+
+  function renderCandidateCard(c) {
+    const band = scoreBand(c.score);
+    const scoreHtml =
+      band === "unscored"
+        ? `<span class="candidate-score-unscored">not yet scored</span>`
+        : `<span class="candidate-score-number">${escapeHtml(c.score)}</span><span class="candidate-score-max">/10</span>`;
+
+    const metaParts = [];
+    if (c.source_count !== null && c.source_count !== undefined) {
+      metaParts.push(
+        `<span class="meta-sources">${ICON_DOCUMENT}${c.source_count} source${c.source_count === 1 ? "" : "s"}</span>`
+      );
+    }
+    const angleEra = [c.angle_type, c.era].filter(Boolean).join(" · ");
+    if (angleEra) {
+      metaParts.push(`<span class="meta-angle">${escapeHtml(angleEra)}</span>`);
+    }
+
+    return `
+      <button type="button" class="candidate-card" data-candidate-id="${escapeHtml(c.candidate_id)}">
+        <div class="candidate-card-main">
+          <p class="candidate-one-liner">${escapeHtml(c.one_liner)}</p>
+          <div class="candidate-score score-${band}">${scoreHtml}</div>
+        </div>
+        ${
+          c.score_tag
+            ? `<div class="candidate-pills">
+                <span class="pill pill-score-tag score-${band}">${escapeHtml(c.score_tag)}</span>
+              </div>`
+            : ""
+        }
+        ${
+          c.flags.length
+            ? `<div class="candidate-pills">
+                ${c.flags
+                  .map((f) => `<span class="pill pill-flag">${ICON_WARNING}${escapeHtml(f)}</span>`)
+                  .join("")}
+              </div>`
+            : ""
+        }
+        ${
+          metaParts.length
+            ? `<hr class="candidate-divider" /><div class="candidate-meta">${metaParts.join("")}</div>`
+            : ""
+        }
+      </button>
+    `;
+  }
+
+  function renderSuppressedCard(c) {
+    return `
+      <div class="suppressed-card">
+        <p class="suppressed-one-liner">${escapeHtml(c.one_liner)}</p>
+        <p class="suppressed-reason">${ICON_X_CIRCLE}<span>${escapeHtml(c.suppression_reason)}</span></p>
+      </div>
+    `;
+  }
+
+  function renderResultContext(count, axis, topic) {
+    const plural = count === 1 ? "" : "s";
+    if (axis === "framings") {
+      els.resultContext.textContent = `${count} candidate${plural} — different framings of one event in ${topic}'s history.`;
+    } else {
+      els.resultContext.textContent = `${count} candidate${plural} — distinct events from ${topic}'s history.`;
+    }
+  }
+
+  function setCandidatesBusy(isBusy) {
+    els.showMoreButton.disabled = isBusy;
+    els.narrowButton.disabled = isBusy;
+    els.narrowSubmit.disabled = isBusy;
+    els.candidateList
+      .querySelectorAll(".candidate-card")
+      .forEach((btn) => (btn.disabled = isBusy));
+  }
+
+  function changeTopic() {
+    showView("topic");
+    els.textarea.value = currentTopic;
+    autoGrow();
+    els.textarea.focus();
+  }
+
+  els.changeTopicButton.addEventListener("click", changeTopic);
+
+  async function renderCandidatesUsage() {
+    els.candidatesUsage.innerHTML = `<p class="usage-line">Loading usage…</p>`;
+    try {
+      const usage = await api.getUsageStatus();
+      const remaining = Math.max(usage.free_limit - usage.scenepapers_generated_count, 0);
+      const pct = Math.min(
+        100,
+        Math.round((usage.scenepapers_generated_count / usage.free_limit) * 100)
+      );
+      els.candidatesUsage.innerHTML = `
+        <div class="usage-line">
+          ${usage.scenepapers_generated_count} of ${usage.free_limit} free papers used (${remaining} left)
+        </div>
+        <div class="usage-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+          <div class="usage-bar-fill" style="width:${pct}%"></div>
+        </div>
+      `;
+    } catch (err) {
+      els.candidatesUsage.innerHTML = `<p class="usage-line">Couldn't load usage status.</p>`;
+    }
+  }
+
+  function renderExhausted(message) {
+    els.resultContext.textContent = "";
+    els.candidateList.innerHTML = `
+      <div class="state-message">
+        <p>${escapeHtml(message)}</p>
+        <button type="button" class="secondary-button" id="exhausted-change-topic">Change topic</button>
+      </div>
+    `;
+    document
+      .getElementById("exhausted-change-topic")
+      .addEventListener("click", changeTopic);
+    els.candidateActions.hidden = true;
+    els.narrowInputRow.hidden = true;
+    els.suppressedSection.hidden = true;
+  }
+
+  function renderSearchFailed(err) {
+    els.resultContext.textContent = "";
+    const detail = err && err.message ? ` (${escapeHtml(err.message)})` : "";
+    els.candidateList.innerHTML = `
+      <div class="state-message">
+        <p>Something went wrong searching for candidates${detail}.</p>
+        <button type="button" class="secondary-button" id="retry-search-button">Try again</button>
+      </div>
+    `;
+    document.getElementById("retry-search-button").addEventListener("click", () => {
+      if (lastSearchParams) runSearch(lastSearchParams);
+    });
+    els.candidateActions.hidden = true;
+    els.narrowInputRow.hidden = true;
+    els.suppressedSection.hidden = true;
+  }
+
+  function renderCandidates(result) {
+    const { candidates, suppressed, axis, topic } = result;
+    renderResultContext(candidates.length, axis, topic);
+
+    if (!candidates.length) {
+      // Fewer than 3 (including zero) passed the suppression floor — show
+      // what exists, don't pad with placeholders.
+      els.candidateList.innerHTML = `
+        <div class="state-message"><p>No candidates passed verification this round.</p></div>
+      `;
+    } else {
+      els.candidateList.innerHTML = candidates.map(renderCandidateCard).join("");
+      els.candidateList.querySelectorAll(".candidate-card").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const candidate = candidates.find((c) => c.candidate_id === btn.dataset.candidateId);
+          handlePickCandidate(candidate);
+        });
+      });
+    }
+
+    excludeAngleTypes = excludeAngleTypes.concat(candidates.map((c) => c.angle_type));
+
+    els.candidateActions.hidden = false;
+
+    if (SHOW_SUPPRESSED_DEV_SECTION && suppressed && suppressed.length) {
+      els.suppressedSection.hidden = false;
+      els.suppressedHeader.innerHTML = `${ICON_EYE_SLASH}<span class="section-label">suppressed — filtered by the verification layer</span>`;
+      els.suppressedList.innerHTML = suppressed.map(renderSuppressedCard).join("");
+    } else {
+      els.suppressedSection.hidden = true;
+    }
+  }
+
+  async function runSearch(params) {
+    lastSearchParams = params;
+    setCandidatesBusy(true);
+    els.candidateActions.hidden = true;
+    els.suppressedSection.hidden = true;
+    els.candidateList.innerHTML = `
+      <div class="state-message"><p>Searching for verified candidate stories…</p></div>
+    `;
+
+    let result;
+    try {
+      result = await api.searchCandidates(params);
+    } catch (err) {
+      renderSearchFailed(err);
+      setCandidatesBusy(false);
+      return;
+    }
+
+    if (result.exhausted) {
+      renderExhausted(result.message);
+      setCandidatesBusy(false);
+      return;
+    }
+
+    renderCandidates(result);
+    setCandidatesBusy(false);
+  }
+
+  function handlePickCandidate(candidate) {
+    runGenerationProgress(candidate);
+  }
+
+  els.showMoreButton.addEventListener("click", () => {
+    runSearch({ topic: currentTopic, excludeAngleTypes });
+  });
+
+  els.narrowButton.addEventListener("click", () => {
+    els.narrowInputRow.hidden = !els.narrowInputRow.hidden;
+    if (!els.narrowInputRow.hidden) els.narrowInput.focus();
+  });
+
+  function submitNarrowHint() {
+    const hint = els.narrowInput.value.trim();
+    if (!hint) return;
+    excludeAngleTypes = []; // a hint changes the search space, not a continuation of it
+    els.narrowInputRow.hidden = true;
+    els.narrowInput.value = "";
+    runSearch({ topic: currentTopic, hint });
+  }
+
+  els.narrowSubmit.addEventListener("click", submitNarrowHint);
+  els.narrowInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitNarrowHint();
+    }
+  });
+
+  // ==========================================================================
+  // Screen: Generation progress
+  // ==========================================================================
+  //
+  // Sits between picking a candidate and Scene Paper View. The step list is
+  // a visual pace-setter over ONE real async call, not five observable
+  // phases — POST /generate returns as soon as the job is accepted (202),
+  // long before the paper exists, so this screen owns the poll loop against
+  // GET /paper?id= until it does. The first N-1 steps advance on a fixed,
+  // fast cadence purely to establish visible motion; the LAST step stays in
+  // its "active" (spinning) state for as long as polling actually takes —
+  // which, per real testing, can run well past the documented 15-30s — so a
+  // slow real run never reads as a stalled one.
+
+  const GENERATION_POLL_INTERVAL_MS = 3000;
+  const GENERATION_POLL_TIMEOUT_MS = 90000;
+  const GENERATION_REASSURANCE_AFTER_MS = 15000;
+
+  const PROGRESS_STEPS = [
+    { label: "Searching sources" },
+    { label: "Verifying claims" },
+    { label: "Structuring the scene paper" },
+    { label: "Generating voiceover" },
+    { label: "Matching images" },
+  ];
+
+  function prefersReducedMotion() {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  function renderProgressSteps(activeIndex) {
+    els.progressSteps.innerHTML = PROGRESS_STEPS.map((step, i) => {
+      let iconHtml = ICON_CIRCLE_DASHED;
+      let iconClass = "";
+      let labelClass = "";
+      if (i < activeIndex) {
+        iconHtml = ICON_CHECK_CIRCLE_FILL;
+        iconClass = "is-complete";
+        labelClass = "is-complete";
+      } else if (i === activeIndex) {
+        iconHtml = ICON_CIRCLE_NOTCH;
+        iconClass = "is-active";
+        labelClass = "is-current";
+      }
+      return `
+        <div class="progress-step">
+          <div class="progress-step-icon ${iconClass}">${iconHtml}</div>
+          <div class="progress-step-label ${labelClass}">${escapeHtml(step.label)}</div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderProgressFailed(err, candidate) {
+    const detail = err && err.message ? ` (${escapeHtml(err.message)})` : "";
+    els.progressSteps.innerHTML = `
+      <div class="state-message">
+        <p>Something went wrong generating the scene paper${detail}.</p>
+        <button type="button" class="secondary-button" id="progress-retry-button">Try again</button>
+        <button type="button" class="secondary-button" id="progress-back-button">${ICON_ARROW_LEFT}back to candidates</button>
+      </div>
+    `;
+    document.getElementById("progress-retry-button").addEventListener("click", () => {
+      runGenerationProgress(candidate);
+    });
+    document.getElementById("progress-back-button").addEventListener("click", () => {
+      showView("candidates");
+    });
+  }
+
+  function showProgressReassurance() {
+    if (document.getElementById("progress-reassurance")) return;
+    els.progressSteps.insertAdjacentHTML(
+      "beforeend",
+      `<p class="progress-reassurance" id="progress-reassurance">Generation can take a while for a new topic — this is still working.</p>`
+    );
+  }
+
+  // Polls GET /paper?id= until it resolves (api.getPaper returns the paper),
+  // times out, or throws (a real backend error — not just "not ready yet",
+  // which getPaper already represents as null rather than a rejection).
+  async function pollForPaper(paperId) {
+    const deadline = Date.now() + GENERATION_POLL_TIMEOUT_MS;
+    const reassuranceAt = Date.now() + GENERATION_REASSURANCE_AFTER_MS;
+    for (;;) {
+      const paper = await api.getPaper(paperId);
+      if (paper) return paper;
+      if (Date.now() >= reassuranceAt) showProgressReassurance();
+      if (Date.now() >= deadline) {
+        throw new Error(
+          "Generation is taking longer than expected. It may still finish in the background — try checking back, or try again."
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, GENERATION_POLL_INTERVAL_MS));
+    }
+  }
+
+  async function runGenerationProgress(candidate) {
+    els.progressOneLiner.textContent = candidate.one_liner;
+    showView("progress");
+
+    const stepDelay = prefersReducedMotion() ? 80 : 600;
+    const introSteps = PROGRESS_STEPS.length - 1;
+    renderProgressSteps(0);
+    for (let i = 0; i < introSteps; i++) {
+      await new Promise((resolve) => setTimeout(resolve, stepDelay));
+      renderProgressSteps(i + 1);
+    }
+    // Last step ("Matching images") is now "active" and stays that way —
+    // rendered once above, not touched again until we leave this screen.
+
+    try {
+      const { paper_id } = await api.startGeneration({ candidate, topic: currentTopic });
+      const paper = await pollForPaper(paper_id);
+      showScenePaper(paper);
+    } catch (err) {
+      renderProgressFailed(err, candidate);
+    }
+  }
+
+  // ==========================================================================
+  // Screen 3: Scene paper view
+  // ==========================================================================
+
+  const ICON_CHECK = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const ICON_PLAY = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 2.5v11l10-5.5-10-5.5Z"/></svg>`;
+  const ICON_PAUSE = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3.5" y="2.5" width="3.2" height="11"/><rect x="9.3" y="2.5" width="3.2" height="11"/></svg>`;
+  const ICON_CHEVRON = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3.5 11 8l-5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+  let currentPaper = null;
+  let selectedHookLabel = null;
+
+  // Renders a {text, verified} span array — hooks[].text and, later, scene
+  // script lines. Verified spans render as plain text; unverified spans
+  // (narrative framing, not sourced fact) get a visually distinct dotted
+  // underline — the fact-vs-framing distinction from CLAUDE.md's rule 5,
+  // decided during the Screen 1 build as span-level, not a per-line bool.
+  function renderSpans(spans) {
+    return spans
+      .map((s) =>
+        s.verified ? escapeHtml(s.text) : `<span class="framing-span">${escapeHtml(s.text)}</span>`
+      )
+      .join("");
+  }
+
+  // CLAUDE.md's ScenePaper schema has no top-level score/tag field — scoring
+  // lives per-source. This derives a paper-level badge (average confidence
+  // across non-suppressed sources) for the UI; flagging this as an
+  // assumption, not a documented field, in case a real endpoint later
+  // returns one directly.
+  function paperScoreInfo(paper) {
+    const used = paper.sources.filter((s) => !s.suppressed);
+    const avg = used.length
+      ? Math.round(used.reduce((sum, s) => sum + s.confidence_score, 0) / used.length)
+      : 0;
+    const band = scoreBand(avg);
+    const tag =
+      band === "success" ? "Primary-sourced" : band === "warning" ? "Corroborated" : "Needs checking";
+    return { score: avg, band, tag, sourceCount: used.length };
+  }
+
+  function renderPaperMeta(paper) {
+    els.paperNumber.textContent = `#${paper.paper_number}`;
+    els.paperCategory.textContent = paper.category;
+  }
+
+  function renderVerificationBadge(paper) {
+    const { score, band, tag, sourceCount } = paperScoreInfo(paper);
+    els.verificationBadge.innerHTML = `
+      <span class="verification-pill pill-score-tag score-${band}">${ICON_SHIELD_CHECK}${score}/10 · ${escapeHtml(tag)}</span>
+      <span class="meta-sources">${ICON_DOCUMENT}${sourceCount} verified source${sourceCount === 1 ? "" : "s"}</span>
+    `;
+  }
+
+  els.backToCandidatesButton.addEventListener("click", () => {
+    showView("candidates");
+  });
+
+  function formatPlaybackTime(seconds) {
+    if (!Number.isFinite(seconds)) return "0:00";
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  function renderAudioPlayer(paper) {
+    if (paper.media_status === "generating") {
+      els.audioPlayer.innerHTML = `
+        <div class="audio-player-surface">
+          <span class="playback-state-text">Generating voiceover — text is ready to read in the meantime.</span>
+        </div>
+      `;
+      return;
+    }
+
+    if (paper.media_status !== "ready" || !paper.voiceover_url) {
+      els.audioPlayer.innerHTML = `
+        <div class="audio-player-surface">
+          <span class="playback-state-text">Voiceover generation failed — the text below is still usable.</span>
+        </div>
+      `;
+      return;
+    }
+
+    els.audioPlayer.innerHTML = `
+      <div class="audio-player-surface">
+        <button type="button" class="playback-button" id="playback-toggle" aria-label="Play voiceover">${ICON_PLAY}</button>
+        <div class="playback-track" id="playback-track"><div class="playback-track-fill" id="playback-track-fill"></div></div>
+        <span class="playback-time mono" id="playback-time">0:00 / 0:00</span>
+        <audio id="voiceover-audio" src="${escapeHtml(paper.voiceover_url)}" preload="metadata"></audio>
+      </div>
+    `;
+
+    const audio = document.getElementById("voiceover-audio");
+    const toggleButton = document.getElementById("playback-toggle");
+    const track = document.getElementById("playback-track");
+    const trackFill = document.getElementById("playback-track-fill");
+    const timeLabel = document.getElementById("playback-time");
+
+    function updateTime() {
+      const total = Number.isFinite(audio.duration) ? audio.duration : 0;
+      timeLabel.textContent = `${formatPlaybackTime(audio.currentTime)} / ${formatPlaybackTime(total)}`;
+      trackFill.style.width = total ? `${(audio.currentTime / total) * 100}%` : "0%";
+    }
+
+    audio.addEventListener("loadedmetadata", updateTime);
+    audio.addEventListener("timeupdate", updateTime);
+    audio.addEventListener("ended", () => {
+      toggleButton.innerHTML = ICON_PLAY;
+      toggleButton.setAttribute("aria-label", "Play voiceover");
+    });
+
+    toggleButton.addEventListener("click", () => {
+      if (audio.paused) {
+        audio.play();
+        toggleButton.innerHTML = ICON_PAUSE;
+        toggleButton.setAttribute("aria-label", "Pause voiceover");
+      } else {
+        audio.pause();
+        toggleButton.innerHTML = ICON_PLAY;
+        toggleButton.setAttribute("aria-label", "Play voiceover");
+      }
+    });
+
+    track.addEventListener("click", (event) => {
+      if (!Number.isFinite(audio.duration) || audio.duration === 0) return;
+      const rect = track.getBoundingClientRect();
+      const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+      audio.currentTime = ratio * audio.duration;
+    });
+  }
+
+  function renderHooks(paper) {
+    els.hookList.innerHTML = paper.hooks
+      .map((h) => {
+        const selected = selectedHookLabel === h.label;
+        return `
+          <button type="button" class="hook-card${selected ? " selected" : ""}" data-hook-label="${escapeHtml(h.label)}" aria-pressed="${selected}">
+            <div class="hook-head">
+              <span class="hook-label-type">${escapeHtml(h.label)} — ${escapeHtml(h.type)}</span>
+              ${selected ? `<span class="hook-selected-icon">${ICON_CHECK_CIRCLE_FILL}</span>` : ""}
+            </div>
+            <p class="hook-text">"${renderSpans(h.text)}"</p>
+            <p class="hook-note">${escapeHtml(h.best_for_note)}</p>
+          </button>
+        `;
+      })
+      .join("");
+
+    els.hookList.querySelectorAll(".hook-card").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        selectedHookLabel = btn.dataset.hookLabel;
+        renderHooks(currentPaper);
+      });
+    });
+  }
+
+  function renderTiming(paper) {
+    const tiles = [
+      { label: "Runtime", value: paper.runtime_estimate },
+      { label: "Hook window", value: paper.hook_window },
+      { label: "Peak tension", value: paper.peak_tension_window },
+      { label: "Payoff", value: paper.payoff_window },
+    ];
+    els.timingGrid.innerHTML = tiles
+      .map(
+        (t) => `
+          <div class="timing-tile">
+            <span class="timing-label">${escapeHtml(t.label)}</span>
+            <span class="timing-value mono">${escapeHtml(t.value)}</span>
+          </div>
+        `
+      )
+      .join("");
   }
 
   function pacingClass(tag) {
@@ -55,290 +746,340 @@
     }
   }
 
-  function switchView(view) {
-    els.viewTopic.classList.toggle("hidden", view !== "topic");
-    els.viewPaper.classList.toggle("hidden", view !== "paper");
-  }
-
-  // ---- usage widget (mocked usage-gate UI) -----------------------------
-
-  async function renderUsageWidget() {
-    const usage = await api.getUsageStatus();
-    const remaining = Math.max(usage.free_limit - usage.scenepapers_generated_count, 0);
-    const pct = Math.min(
-      100,
-      Math.round((usage.scenepapers_generated_count / usage.free_limit) * 100)
-    );
-    els.usageWidget.innerHTML = `
-      <div class="usage-count">
-        Free generations used: <strong>${usage.scenepapers_generated_count} of ${usage.free_limit}</strong>
-        (${remaining} left)
-      </div>
-      <div class="usage-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
-        <div class="usage-bar-fill" style="width:${pct}%"></div>
-      </div>
-      <div class="simulated-badge">Simulated for demo — no real payment gateway</div>
-    `;
-  }
-
-  // ---- candidate picker --------------------------------------------------
-
-  function renderCandidates(candidates) {
-    els.candidateList.innerHTML = candidates
+  function renderScenes(paper) {
+    els.sceneRows.innerHTML = paper.scenes
       .map(
-        (c) => `
-        <article class="candidate-card">
-          <p class="candidate-one-liner">${escapeHtml(c.one_liner)}</p>
-          <div class="candidate-meta">
-            <span class="score-badge">${escapeHtml(c.confidence_score)}/10</span>
-            <span class="tag-badge">${escapeHtml(c.tag)}</span>
-            ${c.flags
-              .map((f) => `<span class="flag-badge">${escapeHtml(f)}</span>`)
-              .join("")}
+        (s) => `
+          <div class="scene-row" data-scene-number="${escapeHtml(s.scene_number)}" role="button" tabindex="0">
+            <span class="scene-row-number mono">${escapeHtml(s.scene_number)}</span>
+            <span class="scene-row-name">${escapeHtml(s.scene_name)}</span>
+            <span class="scene-row-time mono">${escapeHtml(s.time_range)}</span>
+            <span class="pacing-pill ${pacingClass(s.pacing_tag)}">${escapeHtml(s.pacing_tag)}</span>
+            <span class="scene-row-chevron">${ICON_CHEVRON}</span>
           </div>
-          <button class="pick-button" data-candidate-id="${escapeHtml(c.id)}">
-            Pick this story
-          </button>
-        </article>
-      `
+        `
       )
       .join("");
 
-    els.candidateList.querySelectorAll(".pick-button").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const candidate = candidates.find((c) => c.id === btn.dataset.candidateId);
-        handlePickCandidate(candidate);
+    els.sceneRows.querySelectorAll(".scene-row").forEach((row) => {
+      const open = () => openSceneDetail(Number(row.dataset.sceneNumber));
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          open();
+        }
       });
     });
   }
 
-  async function handleTopicSubmit(event) {
-    event.preventDefault();
-    const topic = els.topicInput.value;
-    els.topicSubmit.disabled = true;
-    els.topicStatus.textContent = "Searching for verified candidate stories...";
-    els.candidateList.innerHTML = "";
-
-    try {
-      const { candidates } = await api.searchStoryIdeas(topic);
-      els.topicStatus.textContent = `Showing ${candidates.length} candidates (top results shown regardless of score — see CLAUDE.md trust model).`;
-      renderCandidates(candidates);
-    } catch (err) {
-      els.topicStatus.textContent = `Something went wrong: ${err.message}`;
-    } finally {
-      els.topicSubmit.disabled = false;
-    }
-  }
-
-  async function handlePickCandidate(candidate) {
-    els.topicStatus.textContent = `Structuring scene paper for: "${candidate.one_liner}"...`;
-
-    const result = await api.generateScenePaper(candidate);
-
-    if (result && result.error === "FREE_LIMIT_REACHED") {
-      els.topicStatus.textContent = `${result.message}`;
-      return;
-    }
-
-    currentPaper = result;
-    renderPaperDetail(currentPaper);
-    switchView("paper");
-    renderUsageWidget();
-  }
-
-  // ---- scene paper detail view --------------------------------------------
-
-  function renderHooks(hooks) {
-    return hooks
-      .map(
-        (h) => `
-        <li class="hook-item">
-          <div class="hook-head">
-            <span class="hook-label">${escapeHtml(h.label)}</span>
-            <span class="hook-type">${escapeHtml(h.type)}</span>
-          </div>
-          <p class="hook-text">"${escapeHtml(h.text)}"</p>
-          <p class="hook-note">${escapeHtml(h.best_for_note)}</p>
-        </li>
-      `
-      )
-      .join("");
-  }
-
-  function renderScenes(scenes) {
-    return scenes
+  function renderSources(paper) {
+    // "Verified sources" — suppressed sources aren't part of this paper's
+    // backing evidence, so (unlike Screen 2) there's no dev-only suppressed
+    // section here; this screen simply doesn't show them.
+    const visible = paper.sources.filter((s) => !s.suppressed);
+    els.sourceRows.innerHTML = visible
       .map(
         (s) => `
-        <li class="scene-item">
-          <div class="scene-head">
-            <span class="scene-number">Scene ${escapeHtml(s.scene_number)}</span>
-            <span class="scene-title">${escapeHtml(s.title)}</span>
-            <span class="pacing-badge ${pacingClass(s.pacing_tag)}">${escapeHtml(s.pacing_tag)}</span>
-            <span class="scene-time">${escapeHtml(s.time_range)}</span>
+          <div class="source-row">
+            <span class="source-check">${ICON_CHECK}</span>
+            <span class="source-row-title">${escapeHtml(s.title)}</span>
+            <span class="source-row-meta">${escapeHtml(s.type)} · ${escapeHtml(s.date)}</span>
           </div>
-          <p class="scene-description">${escapeHtml(s.description)}</p>
-        </li>
-      `
+        `
       )
       .join("");
   }
 
-  function renderDeliveryNotes(notes) {
-    return notes
-      .map(
-        (n) => `
-        <li class="delivery-note-item">
-          <span class="delivery-note-label">${escapeHtml(n.label)}</span>
-          <span class="delivery-note-text">${escapeHtml(n.note)}</span>
-        </li>
-      `
-      )
-      .join("");
+  function renderExportRow(paper) {
+    const unlocked = paper.export_status === "unlocked";
+    els.exportRow.innerHTML = `
+      <div class="export-card-main">
+        <span class="export-card-icon">${ICON_LOCK}</span>
+        <div>
+          <div class="export-state">Audio/video export — ${unlocked ? "unlocked" : "locked"}</div>
+          <div class="export-note">Always-paid feature. Mocked in this prototype — no real charge.</div>
+        </div>
+      </div>
+      <button type="button" class="secondary-button" id="export-toggle">
+        ${unlocked ? "Lock (mock)" : "Unlock (mock)"}
+      </button>
+    `;
+    document.getElementById("export-toggle").addEventListener("click", () => {
+      paper.export_status = unlocked ? "locked" : "unlocked";
+      renderExportRow(paper);
+    });
   }
 
-  function renderSources(sources) {
-    return sources
-      .map((s) => {
-        const suppressedClass = s.suppressed ? "source-card suppressed" : "source-card";
+  function showScenePaper(paper) {
+    currentPaper = paper;
+    // Hook selection persists for as long as this paper is on screen — it's
+    // part of what the user takes to recording. Defaults to the first hook
+    // so something is always active. No schema field exists for this yet,
+    // so it's client-only state, not sent anywhere.
+    selectedHookLabel = paper.hooks[0] ? paper.hooks[0].label : null;
+
+    renderPaperMeta(paper);
+    els.paperTitle.textContent = paper.title;
+    els.paperDek.textContent = paper.dek;
+    renderVerificationBadge(paper);
+    renderAudioPlayer(paper);
+    renderHooks(paper);
+    renderTiming(paper);
+    renderScenes(paper);
+    renderSources(paper);
+    renderExportRow(paper);
+
+    showView("paper");
+  }
+
+  // ==========================================================================
+  // Screen 4: Scene detail
+  // ==========================================================================
+  //
+  // Data shape note: unlike hooks[].text, scenes[].script[].line here is a
+  // plain string (per the Screen 4 brief), not the {text, verified} span
+  // array CLAUDE.md documents. The fact-vs-framing distinction for a scene
+  // lives instead in that scene's own claims[] (see renderClaims below).
+  // Flagged in the checkpoint — two mechanisms for rule 5 now exist in one
+  // paper (hooks: inline spans, scenes: a separate claims list) and that's
+  // worth reconciling in CLAUDE.md, not something resolved unilaterally here.
+
+  const ICON_DIRECTION = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10.5 2.5 13.5 5.5 5.5 13.5H2.5v-3Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9 4 12 7" stroke="currentColor" stroke-width="1.3"/></svg>`;
+  const ICON_FRAMING = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 6.5c0-1.7 1-2.7 2.6-3v1.2c-.8.3-1.2.8-1.2 1.6h1.2v3.2H3V6.5Zm6.2 0c0-1.7 1-2.7 2.6-3v1.2c-.8.3-1.2.8-1.2 1.6h1.2v3.2H9.2V6.5Z" fill="currentColor"/></svg>`;
+  const ICON_IMAGE = `<svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.3" stroke="currentColor" stroke-width="1.2"/><circle cx="5.3" cy="6" r="1.1" stroke="currentColor" stroke-width="1.1"/><path d="M2 11.5 5.5 8l2.5 2.5 2.5-3 3 3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
+
+  let currentSceneIndex = -1;
+
+  // Pulls "[pause 0.8s]"-style tokens out of a direction string so they can
+  // render as their own monospace pill instead of sitting inline as raw
+  // prose — they're data (a TTS-readable cue), not narration.
+  function extractPauseMarkers(direction) {
+    const pauses = [];
+    const cleaned = direction
+      .replace(/\[pause\s+([\d.]+s)\]/gi, (match, dur) => {
+        pauses.push(dur);
+        return "";
+      })
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    return { cleaned, pauses };
+  }
+
+  // A speaker change must be structurally obvious, not just a different
+  // label — any non-primary speaker (SPEAKER_1, SPEAKER_2, ...) gets the
+  // same left-accent-border + tinted-background treatment, per the design
+  // handoff. (An earlier pass rotated a distinct color per secondary
+  // speaker; the handoff uses one consistent accent for all of them, so
+  // that's what this renders now.)
+  function isSecondarySpeaker(speaker) {
+    return speaker !== "SPEAKER";
+  }
+
+  function renderScriptMeta(scene) {
+    const speakerCount = new Set(scene.script.map((l) => l.speaker)).size;
+    els.scriptMeta.textContent = `${scene.script.length} line${
+      scene.script.length === 1 ? "" : "s"
+    } · ${speakerCount} speaker${speakerCount === 1 ? "" : "s"}`;
+  }
+
+  function renderScriptLines(scene) {
+    els.scriptLines.innerHTML = scene.script
+      .map((entry) => {
+        const isQuote = isSecondarySpeaker(entry.speaker);
+        const variantClass = isQuote ? "script-line--secondary" : "";
+        const { cleaned, pauses } = extractPauseMarkers(entry.direction);
         return `
-        <li class="${suppressedClass}">
-          <div class="source-head">
-            <span class="source-title">${escapeHtml(s.title)}</span>
-            <span class="score-badge">${escapeHtml(s.confidence_score)}/10</span>
+          <div class="script-line ${variantClass}">
+            <div class="script-line-head">
+              <span class="speaker-label mono">${escapeHtml(entry.speaker)}</span>
+              ${isQuote ? '<span class="pill quote-tag">Direct quote</span>' : ""}
+            </div>
+            <p class="script-line-text">${escapeHtml(entry.line)}</p>
+            <div class="direction-block">
+              <span class="direction-icon">${ICON_DIRECTION}</span>
+              <span class="direction-text">${escapeHtml(cleaned)}</span>
+              ${pauses
+                .map((p) => `<span class="pause-pill mono">pause ${escapeHtml(p)}</span>`)
+                .join("")}
+            </div>
           </div>
-          <div class="source-meta">
-            <span class="source-type">${escapeHtml(s.type)}</span>
-            <span class="source-date">${escapeHtml(s.date)}</span>
-            <span class="source-verified">${s.verified ? "verified" : "unverified"}</span>
-            <span class="tag-badge">${escapeHtml(s.tag)}</span>
-          </div>
-          ${
-            s.flags && s.flags.length
-              ? `<div class="source-flags">${s.flags
-                  .map((f) => `<span class="flag-badge">${escapeHtml(f)}</span>`)
-                  .join("")}</div>`
-              : ""
-          }
-          ${
-            s.suppressed
-              ? `<div class="suppression-notice">
-                  <strong>Suppressed.</strong> ${escapeHtml(s.suppression_reason)}
-                </div>`
-              : ""
-          }
-        </li>
-      `;
+        `;
       })
       .join("");
   }
 
-  function renderPlaybackStub(paper) {
-    const hasAudio = Boolean(paper.voiceover_url);
-    return `
-      <div class="playback-stub">
-        <button class="playback-button" disabled>&#9654; Play voiceover</button>
-        <span class="playback-state">
-          ${
-            hasAudio
-              ? "Ready"
-              : "Not yet available — voiceover generation runs in a later pipeline stage (Tier 1, in progress on another worktree)."
-          }
-        </span>
+  function renderClaims(scene) {
+    const claims = scene.claims || [];
+    if (!claims.length) {
+      els.claimsList.innerHTML = `<p class="usage-line">No individually flagged claims in this scene.</p>`;
+      return;
+    }
+    els.claimsList.innerHTML = claims
+      .map((c) => {
+        if (c.verified) {
+          const sourcesText = (c.sources || [])
+            .map((s) => `${escapeHtml(s.title)} (${escapeHtml(s.date)})`)
+            .join("; ");
+          return `
+            <div class="claim-row is-verified">
+              <div class="claim-kind is-verified">${ICON_CHECK}verified fact</div>
+              <p class="claim-text">${escapeHtml(c.text)}</p>
+              <p class="claim-source-line">${sourcesText}</p>
+            </div>
+          `;
+        }
+        return `
+          <div class="claim-row is-framing">
+            <div class="claim-kind is-framing">${ICON_FRAMING}narrative framing</div>
+            <p class="claim-text is-framing">${escapeHtml(c.text)}</p>
+            <p class="claim-source-line">Not a sourced claim — narrative framing.</p>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  // Per the design handoff: the image-matching pipeline isn't built, so this
+  // always shows the honest pending state — never a real or fake photo,
+  // regardless of what's in paper.image_set (which mockApi.js keeps empty
+  // for exactly this reason). Swap stays disabled; there's nothing to swap.
+  function renderSceneImage() {
+    els.sceneImageBlock.innerHTML = `
+      <div class="scene-image-thumb">${ICON_IMAGE}</div>
+      <div class="scene-image-info">
+        <p class="scene-image-description">Image not yet generated — matching pipeline pending</p>
+        <p class="scene-image-note">Honestly reflects the current build status</p>
       </div>
+      <button type="button" class="secondary-button" id="swap-image-button" disabled>Swap</button>
     `;
   }
 
-  function renderExportGate(paper) {
-    const unlocked = paper.export_status === "unlocked";
-    return `
-      <div class="export-gate">
-        <span class="export-state">Export: <strong>${unlocked ? "Unlocked" : "Locked"}</strong></span>
-        <button id="unlock-export-button" class="unlock-button" data-unlocked="${unlocked}">
-          ${unlocked ? "Re-lock (simulated)" : "Unlock export (simulated)"}
-        </button>
-        <div class="simulated-badge">Simulated for demo — no real charge, no payment gateway</div>
-      </div>
-    `;
+  function parseTimeRangeSeconds(timeRange) {
+    const match = /^(\d+)\s*[–-]\s*(\d+)s?$/.exec(timeRange.trim());
+    if (!match) return { start: 0, end: null };
+    return { start: parseInt(match[1], 10), end: parseInt(match[2], 10) };
   }
 
-  function renderPaperDetail(paper) {
-    els.paperStatus.textContent = "";
-    els.paperDetail.innerHTML = `
-      <header class="paper-header">
-        <span class="paper-number">#${escapeHtml(paper.paper_number)}</span>
-        <h2 class="paper-title">${escapeHtml(paper.title)}</h2>
-        <span class="category-badge">${escapeHtml(paper.category)}</span>
-      </header>
+  function renderSceneAudioPlayer(paper, scene) {
+    if (paper.media_status === "generating") {
+      els.sceneAudioPlayer.innerHTML = `
+        <div class="audio-player-surface">
+          <span class="playback-state-text">Generating voiceover — text is ready to read in the meantime.</span>
+        </div>
+      `;
+      return;
+    }
 
-      <p class="paper-dek">${escapeHtml(paper.dek)}</p>
-      <p class="verification-status">${escapeHtml(paper.verification_status)}</p>
+    if (paper.media_status !== "ready" || !paper.voiceover_url) {
+      els.sceneAudioPlayer.innerHTML = `
+        <div class="audio-player-surface">
+          <span class="playback-state-text">Audio not yet generated for this scene.</span>
+        </div>
+      `;
+      return;
+    }
 
-      <div class="windows-row">
-        <span>Runtime: ${escapeHtml(paper.runtime_estimate)}</span>
-        <span>Hook window: ${escapeHtml(paper.hook_window)}</span>
-        <span>Peak tension: ${escapeHtml(paper.peak_tension_window)}</span>
-        <span>Payoff: ${escapeHtml(paper.payoff_window)}</span>
+    const { start, end } = parseTimeRangeSeconds(scene.time_range);
+
+    els.sceneAudioPlayer.innerHTML = `
+      <div class="audio-player-surface">
+        <button type="button" class="playback-button" id="scene-playback-toggle" aria-label="Play scene">${ICON_PLAY}</button>
+        <div class="playback-track" id="scene-playback-track"><div class="playback-track-fill" id="scene-playback-track-fill"></div></div>
+        <span class="playback-time mono" id="scene-playback-time">0:00 / 0:00</span>
+        <audio id="scene-voiceover-audio" src="${escapeHtml(paper.voiceover_url)}" preload="metadata"></audio>
       </div>
-
-      <section class="paper-section">
-        <h3>Hooks</h3>
-        <ul class="hook-list">${renderHooks(paper.hooks)}</ul>
-      </section>
-
-      <section class="paper-section">
-        <h3>Scenes</h3>
-        <ol class="scene-list">${renderScenes(paper.scenes)}</ol>
-      </section>
-
-      <section class="paper-section">
-        <h3>Delivery notes</h3>
-        <ul class="delivery-note-list">${renderDeliveryNotes(paper.delivery_notes)}</ul>
-      </section>
-
-      <section class="paper-section">
-        <h3>CTA</h3>
-        <p class="cta-text">${escapeHtml(paper.cta_text)}</p>
-      </section>
-
-      <section class="paper-section">
-        <h3>Sources</h3>
-        <ul class="source-list">${renderSources(paper.sources)}</ul>
-      </section>
-
-      <section class="paper-section">
-        <h3>Voiceover</h3>
-        ${renderPlaybackStub(paper)}
-      </section>
-
-      <section class="paper-section">
-        <h3>Media status</h3>
-        <p>media_status: <strong>${escapeHtml(paper.media_status)}</strong> — image_set is empty until the images pipeline lands.</p>
-      </section>
-
-      <section class="paper-section">
-        <h3>Export</h3>
-        ${renderExportGate(paper)}
-      </section>
     `;
 
-    const unlockButton = document.getElementById("unlock-export-button");
-    unlockButton.addEventListener("click", async () => {
-      const currentlyUnlocked = unlockButton.dataset.unlocked === "true";
-      unlockButton.disabled = true;
-      const result = await api.setExportUnlocked(paper.id, !currentlyUnlocked);
-      paper.export_status = result.export_status;
-      renderPaperDetail(paper);
+    const audio = document.getElementById("scene-voiceover-audio");
+    const toggleButton = document.getElementById("scene-playback-toggle");
+    const track = document.getElementById("scene-playback-track");
+    const trackFill = document.getElementById("scene-playback-track-fill");
+    const timeLabel = document.getElementById("scene-playback-time");
+
+    // There's no separate per-scene audio file in the schema — this reuses
+    // the whole-paper voiceover_url but constrains playback to this scene's
+    // time_range slice, since that window is already known.
+    function updateTime() {
+      const sceneDuration = end !== null ? end - start : 0;
+      const elapsed = Math.min(Math.max(audio.currentTime - start, 0), sceneDuration || Infinity);
+      timeLabel.textContent = `${formatPlaybackTime(elapsed)} / ${formatPlaybackTime(sceneDuration)}`;
+      trackFill.style.width = sceneDuration ? `${Math.min((elapsed / sceneDuration) * 100, 100)}%` : "0%";
+      if (end !== null && audio.currentTime >= end) {
+        audio.pause();
+        toggleButton.innerHTML = ICON_PLAY;
+        toggleButton.setAttribute("aria-label", "Play scene");
+      }
+    }
+
+    audio.addEventListener("timeupdate", updateTime);
+    audio.addEventListener("loadedmetadata", updateTime);
+
+    toggleButton.addEventListener("click", () => {
+      if (audio.paused) {
+        if (audio.currentTime < start || (end !== null && audio.currentTime >= end)) {
+          audio.currentTime = start;
+        }
+        audio.play();
+        toggleButton.innerHTML = ICON_PAUSE;
+        toggleButton.setAttribute("aria-label", "Pause scene");
+      } else {
+        audio.pause();
+        toggleButton.innerHTML = ICON_PLAY;
+        toggleButton.setAttribute("aria-label", "Play scene");
+      }
+    });
+
+    track.addEventListener("click", (event) => {
+      if (end === null) return;
+      const rect = track.getBoundingClientRect();
+      const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+      audio.currentTime = start + ratio * (end - start);
     });
   }
 
-  // ---- wiring --------------------------------------------------------
+  function renderSceneNav() {
+    const isFirst = currentSceneIndex <= 0;
+    const isLast = currentSceneIndex >= currentPaper.scenes.length - 1;
+    els.scenePrevButton.disabled = isFirst;
+    els.sceneNextButton.disabled = isLast;
+  }
 
-  els.topicForm.addEventListener("submit", handleTopicSubmit);
-  els.backButton.addEventListener("click", () => {
-    currentPaper = null;
-    switchView("topic");
+  function renderSceneDetail(index) {
+    currentSceneIndex = index;
+    const scene = currentPaper.scenes[index];
+
+    els.sceneNumberLabel.textContent = `scene ${scene.scene_number}`;
+    els.scenePacingPillWrap.innerHTML = `<span class="pacing-pill ${pacingClass(
+      scene.pacing_tag
+    )}">${escapeHtml(scene.pacing_tag)}</span>`;
+    els.sceneTimeRange.textContent = scene.time_range;
+    els.sceneTitleText.textContent = scene.scene_name;
+
+    renderSceneAudioPlayer(currentPaper, scene);
+    renderScriptMeta(scene);
+    renderScriptLines(scene);
+    renderClaims(scene);
+    renderSceneImage();
+    renderSceneNav();
+  }
+
+  function openSceneDetail(sceneNumber) {
+    const index = currentPaper.scenes.findIndex((s) => s.scene_number === sceneNumber);
+    if (index === -1) return;
+    renderSceneDetail(index);
+    showView("scene");
+  }
+
+  els.sceneBackButton.addEventListener("click", () => {
+    showView("paper");
   });
 
-  renderUsageWidget();
-  switchView("topic");
+  els.scenePrevButton.addEventListener("click", () => {
+    if (currentSceneIndex > 0) renderSceneDetail(currentSceneIndex - 1);
+  });
+
+  els.sceneNextButton.addEventListener("click", () => {
+    if (currentSceneIndex < currentPaper.scenes.length - 1) renderSceneDetail(currentSceneIndex + 1);
+  });
 })();

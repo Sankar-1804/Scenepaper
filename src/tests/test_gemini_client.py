@@ -608,3 +608,84 @@ def test_error_names_the_extra_key_env_vars_when_everything_is_exhausted(monkeyp
         gemini_client.structure_scene_paper(
             "source text", verification, [], client=exhausted
         )
+
+
+# ---------------------------------------------------------------------------
+# Transient upstream 5xx. Added 2026-08-09 after a live job died on a real
+# "HTTP/1.1 503 Service Unavailable" from generativelanguage.googleapis.com:
+# the failover set only covered {404, 429}, so a momentary blip on Google's
+# side re-raised immediately and killed the whole pipeline run.
+# ---------------------------------------------------------------------------
+
+
+def test_503_is_retried_in_place_before_failing_over(monkeypatch):
+    """A 503 usually clears in a second or two, so retry the SAME model first
+    rather than spending another model's quota on a blip."""
+
+    monkeypatch.setattr(gemini_client.time, "sleep", lambda _s: None)
+
+    primary = gemini_client.GEMINI_MODELS[0]
+    client = _FakeClient(_paper_payload())
+    calls = {"n": 0}
+
+    def flaky(**kwargs):
+        client.models.attempted_models.append(kwargs.get("model"))
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _FakeAPIError(503)
+        return type("FakeResponse", (), {"parsed": _paper_payload()})()
+
+    client.models.generate_content = flaky
+    verification = VerificationResult(
+        overall_confidence_score=8, overall_tag="solid", overall_flags=[], sources=[]
+    )
+
+    result = gemini_client.structure_scene_paper(
+        "source text", verification, [], client=client
+    )
+
+    assert result["verification_status"] == "solid"
+    # Same model twice — it recovered without touching the next model.
+    assert client.models.attempted_models == [primary, primary]
+
+
+def test_persistent_5xx_eventually_fails_over_to_the_next_model(monkeypatch):
+    monkeypatch.setattr(gemini_client.time, "sleep", lambda _s: None)
+
+    client = _FakeClient(
+        _paper_payload(), fail_models={gemini_client.GEMINI_MODELS[0]: 503}
+    )
+    verification = VerificationResult(
+        overall_confidence_score=8, overall_tag="solid", overall_flags=[], sources=[]
+    )
+
+    gemini_client.structure_scene_paper("source text", verification, [], client=client)
+
+    attempts = client.models.attempted_models
+    primary = gemini_client.GEMINI_MODELS[0]
+    # Retried in place the configured number of times, then moved on.
+    assert attempts.count(primary) == gemini_client._IN_PLACE_RETRIES + 1
+    assert attempts[-1] == gemini_client.GEMINI_MODELS[1]
+
+
+def test_429_is_not_retried_in_place(monkeypatch):
+    """Quota won't clear in two seconds — failing over immediately is right,
+    and retrying in place would waste more of an already-exhausted budget."""
+
+    monkeypatch.setattr(gemini_client.time, "sleep", lambda _s: None)
+
+    client = _FakeClient(
+        _paper_payload(), fail_models={gemini_client.GEMINI_MODELS[0]: 429}
+    )
+    verification = VerificationResult(
+        overall_confidence_score=8, overall_tag="solid", overall_flags=[], sources=[]
+    )
+
+    gemini_client.structure_scene_paper("source text", verification, [], client=client)
+    assert client.models.attempted_models == list(gemini_client.GEMINI_MODELS[:2])
+
+
+def test_all_transient_5xx_codes_are_covered():
+    for code in (500, 502, 503, 504):
+        assert code in gemini_client._FAILOVER_STATUS_CODES
+        assert code in gemini_client._RETRYABLE_IN_PLACE_STATUS_CODES

@@ -3,60 +3,187 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
   <title>ScenePaper</title>
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <header class="app-header">
-    <div class="brand">
-      <h1>ScenePaper</h1>
-      <p class="tagline">Topic in. Source-verified, recording-ready scene paper out.</p>
-    </div>
-    <div id="usage-widget" class="usage-widget" aria-live="polite">
-      <!-- filled by app.js: renderUsageWidget() -->
-    </div>
+  <!--
+    No separate splash overlay. The logo below (#hero-logo) is the ONE
+    element that ever shows the splash SVG — it plays in place, freezes on
+    its final frame, and simply stays there; the rest of the page (marked
+    .pre-reveal) fades in around it once js/splash.js's timer fires. This
+    is deliberate: swapping between a separate splash element and a second
+    "real" logo element risks a visible pop/mismatch at the handoff moment,
+    which is exactly what must never happen here.
+  -->
+  <header class="app-header pre-reveal">
+    <!-- Text placeholder — gets replaced by the logo once designed. -->
+    <span class="brand-name">ScenePaper</span>
+    <button id="settings-button" class="text-button" type="button" title="Settings — not built yet">
+      Settings
+    </button>
   </header>
 
-  <main>
-    <!-- ============ VIEW 1: Topic input + candidate picker ============ -->
-    <section id="view-topic" class="view">
-      <form id="topic-form" class="topic-form">
-        <label for="topic-input">What's the topic?</label>
-        <div class="topic-row">
-          <input
-            id="topic-input"
-            type="text"
-            placeholder="e.g. the first person to swim the English Channel"
-            autocomplete="off"
-            required
-          />
-          <button type="submit" id="topic-submit">Find stories</button>
-        </div>
-      </form>
+  <!-- ============ Screen 1: Topic input (unchanged — colors only) ============ -->
+  <main class="screen screen-topic" id="view-topic">
+    <div class="hero-block">
+      <div id="hero-logo" class="hero-logo" role="img" aria-label="ScenePaper"></div>
+      <p class="hero-tagline">Researched. Structured. Cited.</p>
+    </div>
 
-      <div id="topic-status" class="status-line" role="status"></div>
+    <form id="topic-form" class="topic-form pre-reveal">
+      <div class="chat-row">
+        <label for="topic-input" class="sr-only">Topic</label>
+        <textarea
+          id="topic-input"
+          class="topic-textarea"
+          rows="1"
+          placeholder="a founder who almost gave up"
+          aria-label="Topic"
+        ></textarea>
+        <button id="topic-submit" type="submit" class="primary-button">Find stories</button>
+      </div>
+      <p id="topic-error" class="field-error" role="alert" hidden></p>
+      <p id="topic-status" class="status-line" role="status" aria-live="polite"></p>
+    </form>
+  </main>
 
-      <div id="candidate-list" class="candidate-list"></div>
-    </section>
+  <!-- ============ Screen 2: Candidate selection ============ -->
+  <main class="screen screen-candidates screen-wide" id="view-candidates" hidden>
+    <div class="topic-recap">
+      <span class="topic-recap-label">Searching for</span>
+      <span class="topic-recap-text" id="topic-recap-text"></span>
+      <button type="button" class="text-button" id="change-topic-button">edit</button>
+    </div>
 
-    <!-- ============ VIEW 2: Scene paper detail ============ -->
-    <section id="view-paper" class="view hidden">
-      <button id="back-to-candidates" class="link-button">&larr; Back to candidates</button>
-      <div id="paper-status" class="status-line" role="status"></div>
-      <div id="paper-detail"></div>
+    <h2 class="candidates-heading">Pick a story to script</h2>
+
+    <div class="usage-line-wrap" id="candidates-usage" aria-live="polite"></div>
+
+    <p class="result-context" id="result-context" aria-live="polite"></p>
+
+    <div class="candidate-list" id="candidate-list" aria-live="polite">
+      <!-- rendered by app.js: renderCandidates() -->
+    </div>
+
+    <div class="candidate-actions" id="candidate-actions">
+      <button type="button" class="secondary-button" id="show-more-button"></button>
+      <button type="button" class="secondary-button" id="narrow-button"></button>
+    </div>
+
+    <div class="narrow-input-row" id="narrow-input-row" hidden>
+      <label for="narrow-input" class="sr-only">Refine results</label>
+      <input
+        type="text"
+        id="narrow-input"
+        placeholder="more about failure"
+        aria-label="Refine results"
+      />
+      <button type="button" class="primary-button" id="narrow-submit">Apply</button>
+    </div>
+
+    <section class="suppressed-dev-section" id="suppressed-dev-section" hidden>
+      <hr class="divider" />
+      <div class="suppressed-header" id="suppressed-header"></div>
+      <div class="suppressed-list" id="suppressed-list"></div>
     </section>
   </main>
 
-  <footer class="app-footer">
-    <p>
-      <strong>Mock data notice:</strong> every result on this screen comes from
-      <code>src/web/js/mockApi.js</code> (<code>USE_MOCK_DATA = true</code>), shaped to match the
-      real <code>ScenePaper</code> schema in <code>CLAUDE.md</code>. Swap it for real calls to the
-      Catalyst Advanced I/O Function by flipping that flag — see the comment block at the top of
-      that file.
-    </p>
+  <!-- ============ Screen: Generation progress ============ -->
+  <main class="screen screen-progress" id="view-progress" hidden>
+    <p class="progress-kicker">building your scene paper</p>
+    <p class="progress-one-liner" id="progress-one-liner"></p>
+    <div class="progress-steps" id="progress-steps"></div>
+  </main>
+
+  <!-- ============ Screen 3: Scene paper view ============ -->
+  <main class="screen screen-paper" id="view-paper" hidden>
+    <div class="paper-meta-row">
+      <div class="paper-meta-line">
+        <span id="paper-number"></span>
+        <span aria-hidden="true">·</span>
+        <span id="paper-category"></span>
+      </div>
+      <button type="button" class="text-button" id="back-to-candidates-button"></button>
+    </div>
+
+    <h1 class="paper-title" id="paper-title"></h1>
+    <p class="paper-dek" id="paper-dek"></p>
+
+    <div class="verification-badge" id="verification-badge"></div>
+
+    <div id="audio-player"></div>
+
+    <section class="paper-section">
+      <span class="section-label">hooks — pick your opening</span>
+      <div class="hook-list" id="hook-list"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">timing</span>
+      <div class="timing-grid" id="timing-grid"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">scenes</span>
+      <div class="scene-rows" id="scene-rows"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">verified sources</span>
+      <div class="source-rows" id="source-rows"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">export</span>
+      <div class="export-card" id="export-row"></div>
+    </section>
+  </main>
+
+  <!-- ============ Screen 4: Scene detail ============ -->
+  <main class="screen screen-scene" id="view-scene" hidden>
+    <button type="button" class="text-button" id="scene-back-button"></button>
+
+    <div class="scene-header-line">
+      <span class="scene-header-number mono" id="scene-number-label"></span>
+      <span id="scene-pacing-pill-wrap"></span>
+      <span class="scene-header-time mono" id="scene-time-range"></span>
+    </div>
+
+    <h1 class="scene-title" id="scene-title-text"></h1>
+
+    <div id="scene-audio-player"></div>
+
+    <section class="paper-section">
+      <div class="script-section-header">
+        <span class="section-label">script</span>
+        <span class="script-meta" id="script-meta"></span>
+      </div>
+      <div class="script-lines" id="script-lines"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">claims in this scene</span>
+      <div class="claims-list" id="claims-list"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">scene image</span>
+      <div class="scene-image-block" id="scene-image-block"></div>
+    </section>
+
+    <div class="scene-nav-row">
+      <button type="button" class="secondary-button" id="scene-prev-button"></button>
+      <button type="button" class="secondary-button" id="scene-next-button"></button>
+    </div>
+  </main>
+
+  <footer class="app-footer pre-reveal">
+    <p class="mock-data-note" id="data-source-note"></p>
   </footer>
 
+  <script src="js/splash.js"></script>
   <script src="js/mockApi.js"></script>
   <script src="js/app.js"></script>
 </body>
