@@ -1,12 +1,20 @@
+import logging
+
 import requests
 
 from backend.clients import pexels_client as pexels_module
 from backend.clients.pexels_client import PexelsClient
 
 
-def test_pexels_client_warns_when_no_api_key(monkeypatch, caplog):
+def test_pexels_client_logs_when_no_api_key(monkeypatch, caplog):
+    """Downgraded from a warning to an info log 2026-08-09: a missing key is
+    no longer expected to cause failures (see the live-confirmed note in
+    pexels_client.py's module docstring), so caplog needs to be told to
+    capture below its default WARNING threshold."""
+
     monkeypatch.delenv("PEXELS_API_KEY", raising=False)
-    PexelsClient(api_key=None)
+    with caplog.at_level(logging.INFO):
+        PexelsClient(api_key=None)
     assert any("PEXELS_API_KEY is not set" in r.message for r in caplog.records)
 
 
