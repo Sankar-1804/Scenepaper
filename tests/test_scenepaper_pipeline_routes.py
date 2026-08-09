@@ -304,6 +304,15 @@ def response_json(resp):
 def run_pipeline_route_tests():
     print("\n--- functions/scenepaper_pipeline (Advanced I/O) routing ---")
 
+    # /ideate now runs REAL ideation (SearXNG + Gemini). Stub it here so this
+    # harness stays fully offline and costs no API quota -- the ideation
+    # pipeline itself is covered by scenepaper-api's own tests.
+    pipeline_main._run_ideation_search = lambda topic: [
+        {"one_liner": f"stubbed candidate {n} for '{topic}'",
+         "confidence_score": None, "flags": [], "sources": []}
+        for n in ("A", "B", "C")
+    ]
+
     # /paper?id=<id> -- the only form that survives the API Gateway, which
     # rewrites each rule to a fixed target path and so cannot carry a
     # per-request id in the path.

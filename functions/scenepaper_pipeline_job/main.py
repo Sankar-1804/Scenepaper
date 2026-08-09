@@ -139,6 +139,21 @@ def _stage_images(scene_paper: dict) -> list:
     return []
 
 
+def _drop_null_values(obj):
+    """Recursively remove None-valued keys/entries.
+
+    Catalyst NoSQL rejects DynamoDB's NULL type outright, so a None anywhere
+    in the document fails the whole insert with INVALID_INPUT. See the note in
+    _stage_write_scenepaper.
+    """
+
+    if isinstance(obj, dict):
+        return {k: _drop_null_values(v) for k, v in obj.items() if v is not None}
+    if isinstance(obj, list):
+        return [_drop_null_values(v) for v in obj if v is not None]
+    return obj
+
+
 def _stage_write_scenepaper(
     paper_id: str, scene_paper: dict, voiceover_url, image_set: list
 ):
@@ -165,8 +180,22 @@ def _stage_write_scenepaper(
         if dropped:
             logger.info("profile parser audit (%s): %s", audit_key, dropped)
 
+    # Drop null-valued attributes rather than storing them. A Python None
+    # encodes to DynamoDB's {'NULL': True}, which Catalyst NoSQL rejects with
+    # INVALID_INPUT ("The input value is not readable") -- the encoder happily
+    # produces it, but the API will not accept it, which is why this only
+    # showed up against the live service and never locally.
+    #
+    # The draft is full of legitimately-null fields (voiceover_url until TTS
+    # runs, hook_overstatement_warning when the hook is fine,
+    # span_verification_warning when the marks are coherent, sources[].date
+    # when a source is undated), so this is the normal case, not an edge case.
+    # Omitting the attribute is equivalent for readers: absent and null both
+    # mean "no value".
+    pruned = _drop_null_values(_floats_to_decimal(doc))
+
     table = zcatalyst_sdk.initialize().nosql().get_table("ScenePaper")
-    table.insert_items({"item": _NoSqlItem.to_nosql(_floats_to_decimal(doc))})
+    table.insert_items({"item": _NoSqlItem.to_nosql(pruned)})
     logger.info("ScenePaper id=%s written to NoSQL", paper_id)
 
 
@@ -212,8 +241,21 @@ def handler(job_request, context):
         voiceover_url = _stage_voiceover(scene_paper)
         image_set = _stage_images(scene_paper)
         _stage_write_scenepaper(paper_id, scene_paper, voiceover_url, image_set)
-    except Exception:
-        logger.exception("scenepaper_pipeline_job failed for paper_id=%s", paper_id)
+    except Exception as exc:
+        # Put the exception TYPE, TEXT and traceback in the log MESSAGE itself.
+        # Catalyst's log viewer surfaces the message field but not the
+        # traceback that logger.exception() attaches, so a bare
+        # logger.exception() reads only "job failed" -- which has already cost
+        # several deploy cycles to diagnose (same lesson as the opaque 502 in
+        # the Advanced I/O function).
+        import traceback
+        logger.error(
+            "scenepaper_pipeline_job failed for paper_id=%s -- %s: %s\n%s",
+            paper_id,
+            type(exc).__name__,
+            exc,
+            traceback.format_exc(),
+        )
         context.close_with_failure()
         return
 

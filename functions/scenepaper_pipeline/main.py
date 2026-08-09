@@ -51,6 +51,44 @@ logger = logging.getLogger()
 
 _PAPER_ID_RE = re.compile(r"^/paper/([^/]+)/?$")
 
+# Config this function needs at runtime, seeded into Catalyst Cache because
+# Catalyst Functions have NO platform-level environment variables (confirmed
+# via both the CLI's functions:config, which exposes only --memory, and the
+# MCP env-var tools, which are AppSail-scoped).
+#
+# SEARXNG_BASE_URL points at the self-hosted SearXNG instance. It is NOT
+# reachable at localhost from here -- this function runs in Catalyst's cloud
+# and SearXNG runs on the developer's machine -- so the cached value is a
+# public tunnel URL. Tunnel URLs change whenever the tunnel restarts, which
+# is exactly why this is a cache entry rather than a constant.
+_CACHED_CONFIG_VARS = ("GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3",
+                       "SEARXNG_BASE_URL")
+
+
+def _seed_config_from_cache() -> None:
+    """Copy runtime config out of Catalyst Cache into os.environ.
+
+    Env wins if already set (local dev / `catalyst serve`). Failures per key
+    are non-fatal: an absent GEMINI_API_KEY_2 is normal, and the callers below
+    degrade with their own clear errors rather than crashing here.
+    """
+
+    try:
+        cache = zcatalyst_sdk.initialize().cache().segment()
+    except Exception:
+        logger.exception("could not reach Catalyst Cache for runtime config")
+        return
+
+    for var in _CACHED_CONFIG_VARS:
+        if os.environ.get(var):
+            continue
+        try:
+            value = (cache.get_value(var) or "").strip()
+            if value:
+                os.environ[var] = value
+        except Exception:
+            pass
+
 
 # --------------------------------------------------------------------------
 # Response helpers
@@ -150,33 +188,39 @@ def _delete_scenepaper(paper_id: str) -> bool:
 # verification & trust model" section). Not implemented here.
 # --------------------------------------------------------------------------
 
-def _stub_run_ideation_search(topic: str) -> list:
+def _run_ideation_search(topic: str) -> list:
+    """Real ideation: classify -> query generation -> SearXNG -> domain-quality
+    filter -> cluster -> one-liner generation (backend/ideation.py).
+
+    Each candidate carries the real sources from its cluster, which is what
+    makes the downstream verification meaningful: POST /generate feeds them
+    straight into Call A, so the score reflects sources the system actually
+    found rather than ones a caller supplied by hand.
+
+    TIMING RISK, know this before changing anything here: measured ~20s
+    locally, and this is an Advanced I/O function with a hard **30-second**
+    cap. The budget is real but thin -- SearXNG is reached over a public
+    tunnel (see _seed_config_from_cache), which adds latency on top. If this
+    starts timing out, the fix is to move ideation to a Job function and poll,
+    exactly as POST /generate already does, NOT to trim the search quality.
     """
-    TODO(issue #9): Replace with the real ideation pipeline: classify
-    broad-vs-specific, build the query set, run it against SearXNG,
-    domain-quality-score + filter, cluster into distinct candidates,
-    summarize each cluster into a one-liner. Always surface the top 3
-    regardless of score (see CLAUDE.md trust model -- no silent
-    suppression except fabrication/satire/AI-content-farms).
-    For now: returns 3 canned placeholder candidates so /ideate's routing
-    and response shape can be exercised locally without SearXNG.
-    """
+
+    from backend import ideation  # imported lazily: keeps cold start cheap
+
+    candidates = ideation.generate_candidate_one_liners(topic)
+
+    # Always surface the top 3 regardless of score (CLAUDE.md trust model).
+    # confidence_score stays None here on purpose -- scoring is Call A's job
+    # during /generate, and inventing a number at ideation time would blur the
+    # two signals the trust model deliberately keeps separate.
     return [
         {
-            "one_liner": f"[stub] Candidate A for '{topic}'",
+            "one_liner": c.get("one_liner", ""),
             "confidence_score": None,
-            "flags": [],
-        },
-        {
-            "one_liner": f"[stub] Candidate B for '{topic}'",
-            "confidence_score": None,
-            "flags": [],
-        },
-        {
-            "one_liner": f"[stub] Candidate C for '{topic}'",
-            "confidence_score": None,
-            "flags": [],
-        },
+            "flags": (["thin sourcing"] if c.get("too_thin_to_summarize") else []),
+            "sources": c.get("sources", []),
+        }
+        for c in candidates
     ]
 
 
@@ -258,7 +302,7 @@ def _handle_ideate(request: Request):
     if not isinstance(topic, str) or not topic.strip():
         return _error(400, "'topic' is required and must be a non-empty string")
 
-    candidates = _stub_run_ideation_search(topic.strip())
+    candidates = _run_ideation_search(topic.strip())
     return _json_response(200, {"status": "success", "topic": topic, "candidates": candidates})
 
 
@@ -379,6 +423,10 @@ def handler(request: Request):
         zcatalyst_sdk.initialize(req=request)
     except Exception:  # pragma: no cover - defensive
         logger.exception("zcatalyst_sdk.initialize(req=...) failed")
+
+    # Gemini keys + SEARXNG_BASE_URL live in Catalyst Cache (Functions have no
+    # environment variables). Must run before any handler that reaches for them.
+    _seed_config_from_cache()
 
     method = request.method
     path = request.path or "/"
