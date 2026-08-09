@@ -1,30 +1,91 @@
 /*
  * styles.css
  * ----------
- * Dark mode only — this application has no light theme, per CLAUDE.md.
+ * Dark mode only. Palette matches the "Nocturne, black variant" design
+ * handoff (Design README.md / ScenePaper.dc.html) — true-black ground,
+ * purple accent, OKLCH semantic pacing/score colors. Icons and type stay
+ * self-contained (inline SVG, system font stack) rather than the handoff's
+ * Phosphor-via-CDN + Google Fonts Inter, so the app has no network
+ * dependency for a live demo — same reasoning as the local mock audio file.
+ *
+ * Screen 1 (Topic input) keeps its own layout/markup unchanged by request —
+ * it only picks up the new color tokens below, same as every other screen.
+ *
  * Flat, hairline borders, generous whitespace, two font weights (400/500),
  * sentence case everywhere except small tracking-wide section labels.
- *
- * Built screen by screen against agents/ui-agent.md's brief. Only Screen 1
- * (Topic input) is styled so far — later screens add to this file, they
- * don't get pre-scaffolded ahead of being specced.
  */
 
 :root {
   color-scheme: dark;
-  --color-bg: #0b0c0e;
-  --color-surface: #16171a;
-  --color-border: #2a2c30;
-  --color-text: #ececee;
-  --color-muted: #93969c;
-  --color-accent: #6d8bff;
-  --color-accent-text: #f5f6ff;
-  --color-danger: #e2766e;
+
+  /* Ground + core roles — see Design README.md "Design tokens" */
+  --color-bg: #000000;
+  --color-surface: #141319;
+  --color-text: #e9e9ed;
+  --color-muted: #9397ab; /* = neutral-500, the ramp's default "muted text" step */
+  --color-accent: #a394f0;
+  --color-accent-2: #b6abe8;
+  --color-accent-text: #15111f; /* dark text for solid accent-filled elements — the accent is light enough that white text would under-contrast */
+  --color-divider: color-mix(in srgb, #e9e9ed 14%, transparent);
+
+  /* Neutral + accent ramps (Nocturne base, unchanged by the black-variant
+     override) — only the steps actually used below are defined. */
+  --color-neutral-300: #cfd3e5;
+  --color-neutral-400: #b2b6ca;
+  --color-neutral-600: #75798c;
+  --color-accent-100: #f5f4ff;
+  --color-accent-200: #e7e5fe;
+  --color-accent-800: #423a6a;
+  --color-accent-900: #2b2741;
+
+  /* Semantic pacing colors — FAST/BUILD/SLOW/WARM, OKLCH per the handoff,
+     boosted chroma vs. stock Nocturne. Background + text are a matched
+     pair, not derived from one flat color. */
+  --pace-fast-bg: oklch(26% 0.1 25);
+  --pace-fast-text: oklch(82% 0.17 25);
+  --pace-build-bg: oklch(28% 0.09 70);
+  --pace-build-text: oklch(84% 0.15 70);
+  --pace-slow-bg: var(--color-accent-800);
+  --pace-slow-text: var(--color-accent-100);
+  --pace-warm-bg: oklch(26% 0.09 150);
+  --pace-warm-text: oklch(80% 0.15 150);
+
+  /* Verification score bands — same three bands (>=7 / 4-6 / <=3) in two
+     variants: a text-only color for large numerals, and a bg+text pair for
+     filled tag pills. Not the same values as the pacing colors even though
+     they're the same hue family — kept as separate tokens per the handoff. */
+  --score-success-text: oklch(75% 0.17 150);
+  --score-warning-text: oklch(80% 0.15 70);
+  --score-danger-text: oklch(70% 0.19 25);
+  --score-tag-success-bg: oklch(25% 0.08 150);
+  --score-tag-success-text: oklch(82% 0.15 150);
+  --score-tag-warning-bg: oklch(26% 0.08 70);
+  --score-tag-warning-text: oklch(85% 0.14 70);
+  --score-tag-danger-bg: oklch(24% 0.09 25);
+  --score-tag-danger-text: oklch(83% 0.17 25);
+
+  /* Flags are always a warning treatment (amber), regardless of the
+     candidate's own score band — a flag is a different kind of signal. */
+  --flag-border: oklch(70% 0.14 70);
+  --flag-text: oklch(78% 0.13 70);
+
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* The attribute selector `[hidden] { display: none }` from the UA
+   stylesheet loses to ANY author class that sets `display` (e.g.
+   `.screen { display: flex }`, `.narrow-input-row { display: flex }`) —
+   attribute selectors and class selectors have equal specificity, so it
+   comes down to source order, and the browser's own stylesheet always
+   loses to ours. One global !important rule here is the standard fix, so
+   every current and future `hidden`-toggled element is actually hidden
+   without having to remember to add a `.foo[hidden]` override per class. */
+[hidden] {
+  display: none !important;
 }
 
 body {
@@ -74,14 +135,14 @@ body.app-revealed .pre-reveal {
   transition: opacity 0.4s ease;
 }
 
-/* ---- header ---- */
+/* ---- header (Screen 1 — unchanged structure, new token colors only) ---- */
 
 .app-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 1.1rem 1.5rem;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-divider);
 }
 
 .brand-name {
@@ -99,7 +160,7 @@ body.app-revealed .pre-reveal {
 }
 
 .text-button:hover {
-  color: var(--color-text);
+  color: var(--color-accent);
 }
 
 /* ---- screen shell ---- */
@@ -115,6 +176,20 @@ body.app-revealed .pre-reveal {
   gap: 2rem;
 }
 
+/* Screens 2-5 are results/reading screens, not a hero — content reads
+   top to bottom rather than sitting vertically centered in the viewport. */
+.screen-candidates,
+.screen-progress,
+.screen-paper,
+.screen-scene {
+  justify-content: flex-start;
+}
+
+/* Candidate selection is a wide, 3-column-card screen per the handoff. */
+.screen-wide {
+  max-width: 980px;
+}
+
 .section-label {
   display: block;
   text-transform: uppercase;
@@ -125,7 +200,13 @@ body.app-revealed .pre-reveal {
   margin-bottom: 0.6rem;
 }
 
-/* ---- hero block (wordmark + tagline lockup) ---- */
+/* Timestamps, scene numbers, time ranges, paper numbers — machine-readable
+   tokens, per CLAUDE.md's typography rule. */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* ---- hero block (Screen 1 — unchanged structure) ---- */
 
 .hero-block {
   display: flex;
@@ -157,40 +238,7 @@ body.app-revealed .pre-reveal {
   color: var(--color-muted);
 }
 
-/* ---- example chips ---- */
-
-.example-chips {
-  text-align: center;
-}
-
-.chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.5rem;
-}
-
-.chip {
-  cursor: pointer;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  color: var(--color-text);
-  border-radius: 999px;
-  padding: 0.4rem 0.9rem;
-  font-size: 0.85rem;
-}
-
-.chip:hover {
-  border-color: var(--color-accent);
-}
-
-.chip:disabled,
-.recent-item:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ---- topic form / chat box ---- */
+/* ---- topic form / chat box (Screen 1 — unchanged structure) ---- */
 
 .topic-form {
   display: flex;
@@ -212,7 +260,7 @@ body.app-revealed .pre-reveal {
   overflow-y: auto;
   resize: none;
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-divider);
   border-radius: 8px;
   padding: 0.9rem 1rem;
   font-size: 1.1rem;
@@ -227,7 +275,7 @@ body.app-revealed .pre-reveal {
 .topic-textarea:focus {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(109, 139, 255, 0.35);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
 
 .topic-textarea:disabled {
@@ -236,7 +284,7 @@ body.app-revealed .pre-reveal {
 
 .field-error {
   margin: 0;
-  color: var(--color-danger);
+  color: var(--score-danger-text);
   font-size: 0.85rem;
 }
 
@@ -254,7 +302,7 @@ body.app-revealed .pre-reveal {
 }
 
 .primary-button:hover:not(:disabled) {
-  background: #7d99ff;
+  background: var(--color-accent-2);
 }
 
 .primary-button:disabled {
@@ -267,32 +315,6 @@ body.app-revealed .pre-reveal {
   color: var(--color-muted);
   font-size: 0.85rem;
   min-height: 1.1em;
-}
-
-/* ---- recent searches ---- */
-
-.recent-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.recent-item {
-  cursor: pointer;
-  background: none;
-  border: none;
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text);
-  text-align: left;
-  padding: 0.6rem 0;
-  font-size: 0.95rem;
-}
-
-.recent-item:last-child {
-  border-bottom: none;
-}
-
-.recent-item:hover {
-  color: var(--color-accent);
 }
 
 /* ---- footer ---- */
@@ -313,4 +335,1044 @@ body.app-revealed .pre-reveal {
   background: var(--color-surface);
   padding: 0.05rem 0.3rem;
   border-radius: 3px;
+}
+
+/* ==========================================================================
+   Screen 2: Candidate selection
+   ========================================================================== */
+
+/* ---- topic recap ---- */
+
+.topic-recap {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.topic-recap-label {
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+.topic-recap-text {
+  font-weight: 500;
+  font-size: 1.05rem;
+  margin-right: auto;
+}
+
+.candidates-heading {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 500;
+}
+
+/* ---- usage line ---- */
+
+.usage-line {
+  color: var(--color-muted);
+  font-size: 0.85rem;
+}
+
+.usage-bar {
+  margin-top: 0.4rem;
+  height: 4px;
+  background: var(--color-surface);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  background: var(--color-accent);
+}
+
+/* ---- result context line ---- */
+
+.result-context {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+/* ---- state messages (loading / exhausted / failed / empty) ---- */
+
+.state-message {
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+  padding: 1.1rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.state-message p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.92rem;
+}
+
+.state-message .secondary-button,
+.state-message .primary-button {
+  align-self: flex-start;
+}
+
+/* ---- candidate list + cards ---- */
+
+.candidate-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 860px) {
+  .candidate-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+.candidate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  background: var(--color-surface);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--color-divider);
+  padding: 1.1rem;
+  color: inherit;
+  font: inherit;
+}
+
+.candidate-card:hover {
+  border-color: var(--color-accent);
+}
+
+.candidate-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.candidate-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.candidate-one-liner {
+  flex: 1;
+  margin: 0;
+  font-weight: 500;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.candidate-score {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.1rem;
+}
+
+.candidate-score-number {
+  font-size: 1.7rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.candidate-score-max {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.score-success .candidate-score-number {
+  color: var(--score-success-text);
+}
+
+.score-warning .candidate-score-number {
+  color: var(--score-warning-text);
+}
+
+.score-danger .candidate-score-number {
+  color: var(--score-danger-text);
+}
+
+.candidate-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+
+.pill-score-tag.score-success {
+  background: var(--score-tag-success-bg);
+  color: var(--score-tag-success-text);
+}
+
+.pill-score-tag.score-warning {
+  background: var(--score-tag-warning-bg);
+  color: var(--score-tag-warning-text);
+}
+
+.pill-score-tag.score-danger {
+  background: var(--score-tag-danger-bg);
+  color: var(--score-tag-danger-text);
+}
+
+.pill-flag {
+  background: transparent;
+  border-color: var(--flag-border);
+  color: var(--flag-text);
+}
+
+.pill-flag svg {
+  flex-shrink: 0;
+}
+
+.candidate-divider {
+  border: none;
+  border-top: 1px solid var(--color-divider);
+  margin: 0.15rem 0;
+}
+
+.candidate-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  color: var(--color-muted);
+  font-size: 0.76rem;
+}
+
+/* Also used standalone in Screen 3's verification badge, not just inside
+   .candidate-meta — kept unscoped so it carries its own muted look there. */
+.meta-sources {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+}
+
+.candidate-meta .meta-angle {
+  text-transform: capitalize;
+}
+
+/* ---- actions row ---- */
+
+.candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.secondary-button {
+  cursor: pointer;
+  background: none;
+  border: 1px solid var(--color-divider);
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+.secondary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---- narrow-it-down input ---- */
+
+.narrow-input-row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.narrow-input-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+  color: var(--color-text);
+}
+
+.narrow-input-row input::placeholder {
+  color: var(--color-muted);
+}
+
+.narrow-input-row input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+/* ---- suppressed section ---- */
+
+.divider {
+  border: none;
+  border-top: 1px solid var(--color-divider);
+  margin: 0 0 1rem;
+}
+
+.suppressed-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+  color: var(--color-muted);
+}
+
+.suppressed-header .section-label {
+  margin-bottom: 0;
+}
+
+.suppressed-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.suppressed-card {
+  border: 1px dashed var(--color-divider);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  opacity: 0.75;
+}
+
+.suppressed-one-liner {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--color-neutral-400);
+  text-decoration: line-through;
+}
+
+.suppressed-reason {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: var(--color-muted);
+  display: flex;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+
+.suppressed-reason svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
+/* ==========================================================================
+   Screen: Generation progress
+   ========================================================================== */
+
+.progress-kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  margin: 0;
+}
+
+.progress-one-liner {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.progress-steps {
+  display: flex;
+  flex-direction: column;
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.progress-step:last-child {
+  border-bottom: none;
+}
+
+.progress-step-icon {
+  flex-shrink: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface);
+  color: var(--color-neutral-600);
+}
+
+.progress-step-icon.is-active {
+  background: var(--color-accent-900);
+  color: var(--color-accent);
+}
+
+.progress-step-icon.is-active svg {
+  animation: progress-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-step-icon.is-active svg {
+    animation: none;
+  }
+}
+
+@keyframes progress-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.progress-step-icon.is-complete {
+  background: var(--color-accent-800);
+  color: var(--color-accent-200);
+}
+
+.progress-step-label {
+  font-size: 0.95rem;
+  color: var(--color-muted);
+}
+
+.progress-step-label.is-current,
+.progress-step-label.is-complete {
+  color: var(--color-text);
+}
+
+/* ==========================================================================
+   Screen 3: Scene paper view
+   ========================================================================== */
+
+.paper-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.paper-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-muted);
+}
+
+.paper-title {
+  margin: 0;
+  font-size: 2.1rem;
+  line-height: 1.2;
+  font-weight: 500;
+}
+
+.paper-dek {
+  margin: 0;
+  color: var(--color-neutral-300);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.verification-badge {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+}
+
+.verification-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 999px;
+}
+
+.paper-section {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- audio player ---- */
+
+.audio-player-surface {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  background: var(--color-surface);
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--color-divider);
+  padding: 0.7rem 1rem;
+}
+
+.playback-button {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  border: 1px solid var(--color-accent);
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.playback-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+
+.playback-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.playback-track {
+  flex: 1;
+  height: 4px;
+  background: var(--color-neutral-600);
+  border-radius: 2px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.playback-track-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--color-accent);
+}
+
+.playback-time {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  color: var(--color-muted);
+}
+
+.playback-state-text {
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+/* ---- hook options ---- */
+
+.hook-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+@media (max-width: 640px) {
+  .hook-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hook-card {
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  background: var(--color-surface);
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--color-divider);
+  padding: 1rem 1.1rem;
+  color: inherit;
+  font: inherit;
+}
+
+.hook-card:hover {
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.hook-card.selected {
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+}
+
+.hook-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.hook-label-type {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--color-accent);
+}
+
+.hook-selected-icon {
+  color: var(--color-accent);
+  flex-shrink: 0;
+  display: flex;
+}
+
+.hook-text {
+  margin: 0.6rem 0;
+  font-style: italic;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.framing-span {
+  color: var(--color-muted);
+  border-bottom: 1px dotted currentColor;
+}
+
+.hook-note {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.82rem;
+}
+
+/* ---- timing grid ---- */
+
+.timing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.75rem;
+}
+
+.timing-tile {
+  background: var(--color-surface);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--color-divider);
+  padding: 0.8rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.timing-label {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--color-muted);
+}
+
+.timing-value {
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+/* ---- scenes ---- */
+
+.scene-rows,
+.source-rows {
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--color-divider);
+  overflow: hidden;
+}
+
+.scene-row {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.scene-row:last-child {
+  border-bottom: none;
+}
+
+.scene-row:hover {
+  background: color-mix(in srgb, var(--color-text) 4%, var(--color-surface));
+}
+
+.scene-row-number {
+  color: var(--color-muted);
+  font-size: 0.85rem;
+  width: 1rem;
+}
+
+.scene-row-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.scene-row-time {
+  color: var(--color-neutral-400);
+  font-size: 0.82rem;
+}
+
+.scene-row-chevron {
+  color: var(--color-muted);
+  display: flex;
+}
+
+.pacing-pill {
+  flex-shrink: 0;
+  display: inline-block;
+  min-width: 3.5rem;
+  text-align: center;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.pacing-fast {
+  background: var(--pace-fast-bg);
+  color: var(--pace-fast-text);
+}
+
+.pacing-build {
+  background: var(--pace-build-bg);
+  color: var(--pace-build-text);
+}
+
+.pacing-slow {
+  background: var(--pace-slow-bg);
+  color: var(--pace-slow-text);
+}
+
+.pacing-warm {
+  background: var(--pace-warm-bg);
+  color: var(--pace-warm-text);
+}
+
+/* ---- verified sources ---- */
+
+.source-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.source-row:last-child {
+  border-bottom: none;
+}
+
+.source-check {
+  flex-shrink: 0;
+  color: var(--score-success-text);
+  display: flex;
+}
+
+.source-row-title {
+  flex: 1;
+  font-size: 0.92rem;
+}
+
+.source-row-meta {
+  flex-shrink: 0;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  text-align: right;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+
+/* ---- export card ---- */
+
+.export-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  background: var(--color-surface);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--color-divider);
+  padding: 1rem 1.1rem;
+}
+
+.export-card-main {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.export-card-icon {
+  flex-shrink: 0;
+  color: var(--color-muted);
+  display: flex;
+}
+
+.export-state {
+  font-size: 0.92rem;
+}
+
+.export-note {
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  margin-top: 0.15rem;
+}
+
+/* ==========================================================================
+   Screen 4: Scene detail
+   ========================================================================== */
+
+.scene-header-line {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.scene-header-number {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.scene-header-time {
+  font-size: 0.85rem;
+  color: var(--color-neutral-400);
+}
+
+.scene-title {
+  margin: 0;
+  font-size: 1.75rem;
+  line-height: 1.25;
+  font-weight: 500;
+}
+
+.script-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.script-meta {
+  color: var(--color-muted);
+  font-size: 0.82rem;
+}
+
+/* ---- script lines ---- */
+
+.script-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.script-line {
+  padding: 1.1rem 1.2rem;
+  border-left: 3px solid transparent;
+  border-radius: 0 8px 8px 0;
+  background: var(--color-surface);
+}
+
+/* Non-primary speakers (direct quotes) get one consistent accent treatment
+   — a speaker change must be structurally obvious, not just a different
+   label, but doesn't need a different color per distinct secondary voice. */
+.script-line--secondary {
+  border-left-color: var(--color-accent);
+  background: var(--color-accent-900);
+}
+
+.script-line-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.speaker-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted);
+  font-size: 0.72rem;
+}
+
+.quote-tag {
+  color: var(--color-accent);
+  background: transparent;
+  border-color: var(--color-accent);
+}
+
+.script-line-text {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  line-height: 1.6;
+}
+
+.direction-block {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  color: var(--color-neutral-400);
+  font-size: 0.85rem;
+}
+
+.direction-icon {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
+.direction-text {
+  flex: 1;
+  min-width: 60%;
+}
+
+.pause-pill {
+  flex-shrink: 0;
+  background: var(--color-accent-900);
+  color: var(--color-accent-200);
+  border-radius: 5px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.72rem;
+}
+
+/* ---- claims ---- */
+
+.claims-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.claim-row {
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.claim-row.is-verified {
+  background: var(--color-surface);
+}
+
+.claim-row.is-framing {
+  background: transparent;
+  border: 1px dashed var(--color-divider);
+}
+
+.claim-kind {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.7rem;
+}
+
+.claim-kind.is-verified {
+  color: var(--score-success-text);
+}
+
+.claim-kind.is-framing {
+  color: var(--color-muted);
+}
+
+.claim-text {
+  margin: 0 0 0.3rem;
+  font-size: 0.95rem;
+}
+
+.claim-text.is-framing {
+  font-style: italic;
+  color: var(--color-neutral-300);
+}
+
+.claim-source-line {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-muted);
+}
+
+/* ---- scene image (always the honest pending placeholder — see app.js) ---- */
+
+.scene-image-block {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem;
+  border: 1px dashed var(--color-divider);
+  border-radius: 8px;
+}
+
+.scene-image-thumb {
+  flex-shrink: 0;
+  width: 5.5rem;
+  height: 4rem;
+  border-radius: 4px;
+  background: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-neutral-600);
+}
+
+.scene-image-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.scene-image-description {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--color-neutral-400);
+}
+
+.scene-image-note {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+/* ---- scene navigation ---- */
+
+.scene-nav-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-divider);
 }

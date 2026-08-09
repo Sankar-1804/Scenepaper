@@ -25,15 +25,11 @@
     </button>
   </header>
 
-  <!-- ============ Screen 1: Topic input ============ -->
-  <main class="screen screen-topic">
+  <!-- ============ Screen 1: Topic input (unchanged — colors only) ============ -->
+  <main class="screen screen-topic" id="view-topic">
     <div class="hero-block">
       <div id="hero-logo" class="hero-logo" role="img" aria-label="ScenePaper"></div>
       <p class="hero-tagline">Researched. Structured. Cited.</p>
-    </div>
-
-    <div class="example-chips pre-reveal" id="example-chips">
-      <!-- rendered by app.js: renderChips() -->
     </div>
 
     <form id="topic-form" class="topic-form pre-reveal">
@@ -51,10 +47,136 @@
       <p id="topic-error" class="field-error" role="alert" hidden></p>
       <p id="topic-status" class="status-line" role="status" aria-live="polite"></p>
     </form>
+  </main>
 
-    <section class="recent-searches pre-reveal" id="recent-searches" aria-live="polite" hidden>
-      <!-- rendered by app.js: renderRecentSearches() -->
+  <!-- ============ Screen 2: Candidate selection ============ -->
+  <main class="screen screen-candidates screen-wide" id="view-candidates" hidden>
+    <div class="topic-recap">
+      <span class="topic-recap-label">Searching for</span>
+      <span class="topic-recap-text" id="topic-recap-text"></span>
+      <button type="button" class="text-button" id="change-topic-button">edit</button>
+    </div>
+
+    <h2 class="candidates-heading">Pick a story to script</h2>
+
+    <div class="usage-line-wrap" id="candidates-usage" aria-live="polite"></div>
+
+    <p class="result-context" id="result-context" aria-live="polite"></p>
+
+    <div class="candidate-list" id="candidate-list" aria-live="polite">
+      <!-- rendered by app.js: renderCandidates() -->
+    </div>
+
+    <div class="candidate-actions" id="candidate-actions">
+      <button type="button" class="secondary-button" id="show-more-button"></button>
+      <button type="button" class="secondary-button" id="narrow-button"></button>
+    </div>
+
+    <div class="narrow-input-row" id="narrow-input-row" hidden>
+      <label for="narrow-input" class="sr-only">Refine results</label>
+      <input
+        type="text"
+        id="narrow-input"
+        placeholder="more about failure"
+        aria-label="Refine results"
+      />
+      <button type="button" class="primary-button" id="narrow-submit">Apply</button>
+    </div>
+
+    <section class="suppressed-dev-section" id="suppressed-dev-section" hidden>
+      <hr class="divider" />
+      <div class="suppressed-header" id="suppressed-header"></div>
+      <div class="suppressed-list" id="suppressed-list"></div>
     </section>
+  </main>
+
+  <!-- ============ Screen: Generation progress ============ -->
+  <main class="screen screen-progress" id="view-progress" hidden>
+    <p class="progress-kicker">building your scene paper</p>
+    <p class="progress-one-liner" id="progress-one-liner"></p>
+    <div class="progress-steps" id="progress-steps"></div>
+  </main>
+
+  <!-- ============ Screen 3: Scene paper view ============ -->
+  <main class="screen screen-paper" id="view-paper" hidden>
+    <div class="paper-meta-row">
+      <div class="paper-meta-line">
+        <span id="paper-number"></span>
+        <span aria-hidden="true">·</span>
+        <span id="paper-category"></span>
+      </div>
+      <button type="button" class="text-button" id="back-to-candidates-button"></button>
+    </div>
+
+    <h1 class="paper-title" id="paper-title"></h1>
+    <p class="paper-dek" id="paper-dek"></p>
+
+    <div class="verification-badge" id="verification-badge"></div>
+
+    <div id="audio-player"></div>
+
+    <section class="paper-section">
+      <span class="section-label">hooks — pick your opening</span>
+      <div class="hook-list" id="hook-list"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">timing</span>
+      <div class="timing-grid" id="timing-grid"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">scenes</span>
+      <div class="scene-rows" id="scene-rows"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">verified sources</span>
+      <div class="source-rows" id="source-rows"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">export</span>
+      <div class="export-card" id="export-row"></div>
+    </section>
+  </main>
+
+  <!-- ============ Screen 4: Scene detail ============ -->
+  <main class="screen screen-scene" id="view-scene" hidden>
+    <button type="button" class="text-button" id="scene-back-button"></button>
+
+    <div class="scene-header-line">
+      <span class="scene-header-number mono" id="scene-number-label"></span>
+      <span id="scene-pacing-pill-wrap"></span>
+      <span class="scene-header-time mono" id="scene-time-range"></span>
+    </div>
+
+    <h1 class="scene-title" id="scene-title-text"></h1>
+
+    <div id="scene-audio-player"></div>
+
+    <section class="paper-section">
+      <div class="script-section-header">
+        <span class="section-label">script</span>
+        <span class="script-meta" id="script-meta"></span>
+      </div>
+      <div class="script-lines" id="script-lines"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">claims in this scene</span>
+      <div class="claims-list" id="claims-list"></div>
+    </section>
+
+    <section class="paper-section">
+      <span class="section-label">scene image</span>
+      <div class="scene-image-block" id="scene-image-block"></div>
+    </section>
+
+    <div class="scene-nav-row">
+      <button type="button" class="secondary-button" id="scene-prev-button"></button>
+      <button type="button" class="secondary-button" id="scene-next-button"></button>
+    </div>
   </main>
 
   <footer class="app-footer pre-reveal">
