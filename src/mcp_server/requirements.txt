@@ -1,0 +1,11 @@
+# MCP server runtime dependencies.
+# Runs outside Catalyst (no Python 3.9 constraint) — needs Python 3.10+.
+
+# PINNED to <2.0 deliberately, NOT >=1.26.0. Verified 2026-08-10:
+#   mcp 1.26.0 -> mcp.server.fastmcp.FastMCP exists  (what server.py imports)
+#   mcp 2.0.0  -> FastMCP REMOVED, replaced by mcp.server.mcpserver.MCPServer
+# `>=1.26.0` resolves to 2.0.0, so server.py fails at import with
+# ModuleNotFoundError. Either keep this pin, or migrate server.py to
+# MCPServer and move to >=2.0 — but the two must change together.
+mcp>=1.26.0,<2.0
+requests>=2.32.0
