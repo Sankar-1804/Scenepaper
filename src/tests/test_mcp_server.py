@@ -5,6 +5,15 @@ Exercises tool logic via the registered functions directly — no live HTTP,
 no MCP transport needed. A fake HTTP layer patches mcp_server.http_client so
 the suite passes without Catalyst being up.
 """
+import pytest
+
+# The MCP SDK requires Python >= 3.10, but the Catalyst functions pin this
+# repo to 3.9 -- and since the merge to main both test suites share
+# src/tests/, `pytest src/tests/` under 3.9 could not even COLLECT this file
+# (ModuleNotFoundError), which aborted the whole run including the 98 tests
+# that do pass. Skip cleanly instead: run this suite under 3.10+.
+pytest.importorskip("mcp", reason="mcp SDK needs Python >= 3.10; see src/mcp_server/requirements.txt")
+
 import json
 import sys
 import os
