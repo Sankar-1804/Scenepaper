@@ -1,126 +1,125 @@
 """
 scenepaper_pipeline_job -- Job Function (the actual pipeline, 15-min budget)
 
-Renamed from the `scenepaper_job_test` scaffold (was created only to
-inspect Catalyst's generated Job-function code template) -- this is now the
-real target of scenepaper_pipeline's POST /generate handler, submitted via
-the Create_Immediate_Job pattern (zcatalyst_sdk job_scheduling().job().
-submit_job(...), see functions/scenepaper_pipeline/main.py).
-
-Why this function exists at all: Advanced I/O Functions (scenepaper_pipeline)
-have a hard 30-second execution timeout. The real pipeline -- SearXNG
-search/cluster, two isolated LLM calls (verification, then structuring per
-CLAUDE.md's prompt-injection defense), TTS, image fetch, and the NoSQL
-write -- does not fit in 30s. Job functions get a 15-minute budget instead,
-so the Advanced I/O function only submits a job here and returns
-immediately; this function does the actual work.
-
-Expected job params (set by scenepaper_pipeline's _handle_generate):
-  paper_id  -- pre-generated id the Advanced I/O function already handed
-               back to the caller, so it can poll GET /paper/:id
+Receives params from the Advanced I/O front door (POST /generate):
+  paper_id  -- pre-generated id already handed back to the caller so it can
+               poll GET /paper?id=<paper_id>
   topic     -- the original topic string the user submitted
-  candidate -- JSON-encoded object: the one candidate the user picked from
-               POST /ideate's results (one_liner, any source hints, etc.)
-  user_id   -- optional, for UserProfile-driven personalization
+  candidate -- JSON-encoded dict: the one candidate the user picked from
+               POST /ideate's results. Expected keys:
+                 one_liner  -- the one-line candidate summary shown to the user
+                 sources    -- optional list of {title, url, snippet, date,
+                               source_type} dicts (empty for stub candidates)
+  user_id   -- optional, not used yet (UserProfile work item 3)
 
-Every real pipeline stage below is stubbed and TODO-marked with the issue
-it belongs to. None of it is implemented here -- search/verify/structure/
-TTS/images are api-integration-agent's scope (issues #9, #10); the NoSQL
-write is blocked on issue #1 (column-type verification for nested JSON
-fields). This function's job tonight is only: receive params correctly,
-walk through the stages in the right order, and close_with_success/
-close_with_failure at the right points.
+Stage layout:
+  1+2  generate_scene_paper (orchestrator) -- Call A + Call B, one import
+  3    voiceover                           -- stub, api-integration-agent
+  4    images                              -- stub, api-integration-agent
+  5    write to NoSQL                      -- REAL
+
+DynamoDB encoding note: all NoSQL values must be DynamoDB-encoded. insert_items
+uses _NoSqlItem.to_nosql() for the full document. See comments in
+functions/scenepaper_pipeline/main.py for the full encoding reference.
 """
 
 import json
 import logging
 
+import zcatalyst_sdk
+from zcatalyst_sdk.nosql.transfom import Item as _NoSqlItem
+
+from backend.clients.gemini_client import SourceMaterial
+from backend.orchestrator import Candidate, generate_scene_paper
+
 logger = logging.getLogger()
 
 
-def _stage_search_and_verify(topic: str, candidate: dict) -> dict:
+def _build_candidate(candidate_dict: dict) -> Candidate:
+    """Map the JSON-decoded candidate dict from the job param to a Candidate.
+
+    The /ideate stub emits {'one_liner': '...'} with no sources. Once ideation
+    is real (work item 1 in api-integration-agent's plan), candidates will also
+    carry a `sources` list of {title, url, snippet, date, source_type} dicts.
+    Both shapes are handled here.
     """
-    TODO(issue #9, api-integration-agent): Run the two-call verification
-    step for the chosen candidate:
-      - Call A (verification/scoring): sources only + platform-owned rules,
-        NEVER sees the user's profile config (prompt-injection defense per
-        CLAUDE.md). Produces a graded confidence score (x/10) plus binary
-        flags (sources conflict / single source only / unverified origin /
-        claim not found in primary sources).
-    Not implemented -- returns the input candidate unchanged with a
-    placeholder score so downstream stages have something to pass along.
-    """
-    logger.info("STUB stage 1/5 (issue #9): search_and_verify for topic=%r", topic)
-    return {**candidate, "confidence_score": None, "flags": ["stub-not-verified"]}
+    summary = candidate_dict.get("one_liner") or candidate_dict.get("summary", "")
+    raw_sources = candidate_dict.get("sources") or []
+    sources = [
+        SourceMaterial(
+            title=s.get("title", ""),
+            url=s.get("url", ""),
+            snippet_or_text=s.get("snippet", ""),
+            date=s.get("date"),
+            source_type=s.get("source_type", "web"),
+        )
+        for s in raw_sources
+        if isinstance(s, dict)
+    ]
+    return Candidate(summary=summary, sources=sources)
 
 
-def _stage_structure(topic: str, verified_candidate: dict) -> dict:
+def _stage_generate(topic: str, candidate: Candidate) -> dict:
+    """Call A (verify) + Call B (structure) via the orchestrator.
+
+    Returns a dict shaped like CLAUDE.md's ScenePaper entity schema, plus
+    `topic` and the profile parser's audit trail fields.
+
+    profile_md_text is omitted here -- work item 3 (UserProfile) will wire it
+    in once the UserProfile entity exists. The orchestrator defaults it to ""
+    and the profile_parser produces empty warnings, so nothing breaks.
     """
-    TODO(issue #9, api-integration-agent): Call B (structuring) -- takes
-    the verified source + Call A's fixed score as input (score is
-    read-only to this call, per CLAUDE.md's prompt-injection defense), plus
-    the user's profile.md format preferences (scene structure, categories,
-    runtime target, tone, avoid-list). Produces the full rich ScenePaper
-    schema: hooks[], scenes[] with pacing tags, delivery_notes[],
-    sources[], cta_text, etc. Also must flag unverifiable narrative framing
-    distinctly from sourced fact (the hook-overstatement check).
-    Not implemented -- returns a minimal placeholder scene paper body.
-    """
-    logger.info("STUB stage 2/5 (issue #9): structure for topic=%r", topic)
-    return {
-        "title": f"[stub] {topic}",
-        "category": "curious",
-        "dek": "[stub structuring output -- not a real scene paper]",
-        "verification_status": verified_candidate.get("confidence_score"),
-        "hooks": [],
-        "scenes": [],
-        "delivery_notes": [],
-        "sources": [],
-        "cta_text": "",
-    }
+    logger.info("stage 1+2/4: generate_scene_paper for topic=%r", topic)
+    return generate_scene_paper(topic, candidate)
 
 
-def _stage_voiceover(scene_paper: dict) -> str:
+def _stage_voiceover(scene_paper: dict):
+    """TODO(api-integration-agent work item 3): TTS via voicebox_client.
+    Fix voicebox_client's assumed /api/tts endpoint, wire POST /generate +
+    poll /generate/{id}/status + fetch /audio/{generation_id}.
+    Returns None until implemented.
     """
-    TODO(issue #10, api-integration-agent): Generate a single consistent
-    TTS voice reading story_body, with pauses inserted at breath points.
-    Per-scene pacing-tag-aware delivery is a Tier 2 refinement, not
-    required here. Not implemented -- returns None (no audio yet).
-    """
-    logger.info("STUB stage 3/5 (issue #10): voiceover")
+    logger.info("STUB stage 2/4: voiceover")
     return None
 
 
 def _stage_images(scene_paper: dict) -> list:
+    """TODO(api-integration-agent work item 4): Pexels stock photos per scene.
+    Wire per-scene keyword → pexels_client fetch. Returns [] until implemented.
     """
-    TODO(issue #10, api-integration-agent): Fetch real stock photos
-    (Pexels or Unsplash) matched per scene keyword -- NOT AI-generated
-    imagery. Not implemented -- returns an empty image_set.
-    """
-    logger.info("STUB stage 4/5 (issue #10): images")
+    logger.info("STUB stage 3/4: images")
     return []
 
 
-def _stage_write_scenepaper(paper_id: str, scene_paper: dict, voiceover_url, image_set: list):
+def _stage_write_scenepaper(
+    paper_id: str, scene_paper: dict, voiceover_url, image_set: list
+):
+    """Write the finished ScenePaper document to Catalyst NoSQL.
+
+    Merges paper_id, voiceover_url, image_set, and locked media/export state
+    into the orchestrator's draft dict before writing. All values must be
+    DynamoDB-encoded -- _NoSqlItem.to_nosql() handles that for the full doc.
     """
-    TODO(work item 1): Wire to the real orchestrator and write the finished
-    ScenePaper document to NoSQL once api-integration-agent lands
-    src/backend/orchestrator.py. Correct SDK surface (confirmed via live probe):
-        from zcatalyst_sdk.nosql.transfom import Item as _NoSqlItem
-        table = zcatalyst_sdk.initialize().nosql().get_table('ScenePaper')
-        doc = {**scene_paper, 'id': paper_id, 'voiceover_url': voiceover_url,
-               'image_set': image_set}
-        table.insert_items({'item': _NoSqlItem.to_nosql(doc)})
-    Not implemented -- just logs what would have been written.
-    """
-    logger.info(
-        "STUB stage 5/5 (work item 1): write ScenePaper id=%s (scene_paper keys=%s, "
-        "voiceover_url=%s, image_set_count=%d)",
-        paper_id,
-        list(scene_paper.keys()),
-        voiceover_url,
-        len(image_set),
-    )
+    logger.info("stage 4/4: write ScenePaper id=%s", paper_id)
+
+    doc = {
+        **scene_paper,
+        "id": paper_id,
+        "voiceover_url": voiceover_url,
+        "image_set": image_set or [],
+        "media_status": "ready" if voiceover_url else "pending",
+        "export_status": "locked",
+    }
+
+    # Remove orchestrator audit-trail keys that aren't part of the schema.
+    for audit_key in ("profile_warnings", "profile_dropped_sections", "profile_truncated_fields"):
+        dropped = doc.pop(audit_key, None)
+        if dropped:
+            logger.info("profile parser audit (%s): %s", audit_key, dropped)
+
+    table = zcatalyst_sdk.initialize().nosql().get_table("ScenePaper")
+    table.insert_items({"item": _NoSqlItem.to_nosql(doc)})
+    logger.info("ScenePaper id=%s written to NoSQL", paper_id)
 
 
 def handler(job_request, context):
@@ -144,19 +143,19 @@ def handler(job_request, context):
         return
 
     try:
-        candidate = json.loads(candidate_raw)
+        candidate_dict = json.loads(candidate_raw)
     except (TypeError, ValueError):
         logger.error("candidate job param was not valid JSON: %r", candidate_raw)
         context.close_with_failure()
         return
 
     try:
-        verified_candidate = _stage_search_and_verify(topic, candidate)
-        scene_paper = _stage_structure(topic, verified_candidate)
+        candidate = _build_candidate(candidate_dict)
+        scene_paper = _stage_generate(topic, candidate)
         voiceover_url = _stage_voiceover(scene_paper)
         image_set = _stage_images(scene_paper)
         _stage_write_scenepaper(paper_id, scene_paper, voiceover_url, image_set)
-    except Exception:  # pragma: no cover - defensive, stages are stubs today
+    except Exception:
         logger.exception("scenepaper_pipeline_job failed for paper_id=%s", paper_id)
         context.close_with_failure()
         return

@@ -80,9 +80,18 @@ pipeline_main = _load_module_from_path(
     "scenepaper_pipeline_main",
     os.path.join(REPO_ROOT, "functions", "scenepaper_pipeline", "main.py"),
 )
+
+# job_main imports `from backend.orchestrator import ...` -- the `backend`
+# package lives inside the job function directory (bundled for Catalyst deploy).
+# Temporarily add that directory to sys.path so the import resolves without
+# a live Catalyst runtime.
+_JOB_FUNC_DIR = os.path.join(REPO_ROOT, "functions", "scenepaper_pipeline_job")
+if _JOB_FUNC_DIR not in sys.path:
+    sys.path.insert(0, _JOB_FUNC_DIR)
+
 job_main = _load_module_from_path(
     "scenepaper_pipeline_job_main",
-    os.path.join(REPO_ROOT, "functions", "scenepaper_pipeline_job", "main.py"),
+    os.path.join(_JOB_FUNC_DIR, "main.py"),
 )
 
 
@@ -230,6 +239,30 @@ _fake_sdk = _FakeCatalystSdk()
 _fake_sdk._store[FIXTURE_PAPER_ID] = dict(FIXTURE_PAPER)
 pipeline_main.zcatalyst_sdk = _fake_sdk
 
+# Patch job_main: share the same fake NoSQL store so writes from the job
+# show up in the same store the pipeline tests read from.
+job_main.zcatalyst_sdk = _fake_sdk
+
+# Patch generate_scene_paper in job_main to avoid real Gemini API calls.
+# Returns a minimal dict with the fields _stage_write_scenepaper expects.
+def _fake_generate_scene_paper(topic, candidate, profile_md_text=None, **kw):
+    return {
+        "title": f"[fake] {topic}",
+        "category": "curious",
+        "dek": "fake dek",
+        "verification_status": "unverified",
+        "hooks": [],
+        "scenes": [],
+        "delivery_notes": [],
+        "sources": [],
+        "cta_text": "",
+        "profile_warnings": [],
+        "profile_dropped_sections": [],
+        "profile_truncated_fields": {},
+    }
+
+job_main.generate_scene_paper = _fake_generate_scene_paper
+
 
 # --------------------------------------------------------------------------
 # Test runner
@@ -358,17 +391,39 @@ def run_pipeline_route_tests():
 def run_job_function_tests():
     print("\n--- functions/scenepaper_pipeline_job (Job function) ---")
 
+    new_paper_id = "job-test-paper-1"
     ctx = FakeContext()
     job_request = FakeJobRequest(
         {
-            "paper_id": "fixture-paper-1",
+            "paper_id": new_paper_id,
             "topic": "underdog comeback",
-            "candidate": json.dumps({"one_liner": "x"}),
+            "candidate": json.dumps({"one_liner": "scrappy startup beats odds"}),
             "user_id": "",
         }
     )
     job_main.handler(job_request, ctx)
     check("Job function closes with success on valid params", ctx.closed_with == "success")
+    written = _fake_sdk._store.get(new_paper_id)
+    check(
+        "Job function writes ScenePaper to NoSQL",
+        written is not None,
+        f"store keys: {list(_fake_sdk._store.keys())}",
+    )
+    check(
+        "Written ScenePaper has correct paper_id",
+        written is not None and written.get("id") == new_paper_id,
+        written,
+    )
+    check(
+        "Written ScenePaper has export_status=locked",
+        written is not None and written.get("export_status") == "locked",
+        written,
+    )
+    check(
+        "Written ScenePaper has title from fake orchestrator",
+        written is not None and written.get("title") == "[fake] underdog comeback",
+        written,
+    )
 
     ctx = FakeContext()
     job_request = FakeJobRequest({"topic": "underdog comeback"})  # missing paper_id/candidate
