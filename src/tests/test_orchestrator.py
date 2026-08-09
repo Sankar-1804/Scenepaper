@@ -12,6 +12,7 @@ Call B receives Call A's fixed verification, and profile.md's audit trail
 from backend import orchestrator
 from backend.clients import gemini_client
 from backend.clients.gemini_client import SourceMaterial
+from backend.clients.pexels_client import PexelsImage
 from backend.verification import VerificationResult
 
 
@@ -164,3 +165,83 @@ def test_generate_scene_paper_never_hands_call_a_any_profile_text(monkeypatch):
     )
 
     assert captured["args"] == ("A candidate", [])
+
+
+# ---------------------------------------------------------------------------
+# attach_scene_images — Work item 4, wires pexels_client into the
+# orchestrator's output.
+# ---------------------------------------------------------------------------
+
+
+class _FakePexelsClient:
+    def __init__(self, images_by_keyword):
+        self._images_by_keyword = images_by_keyword
+        self.calls = []
+
+    def search_with_fallback(self, primary_keyword, fallback_keywords, per_page=1):
+        self.calls.append((primary_keyword, fallback_keywords))
+        return self._images_by_keyword.get(primary_keyword, [])
+
+
+def _image(photographer="Someone"):
+    return PexelsImage(
+        photo_id=1,
+        photographer=photographer,
+        url="https://pexels.com/photo/1",
+        src_large="https://images.pexels.com/1/large.jpg",
+    )
+
+
+def _draft_with_scenes(*scene_names):
+    return {
+        "category": "curious",
+        "scenes": [
+            {"scene_number": i + 1, "scene_name": name}
+            for i, name in enumerate(scene_names)
+        ],
+    }
+
+
+def test_attach_scene_images_uses_scene_name_as_the_primary_keyword():
+    client = _FakePexelsClient({"The offer": [_image()]})
+    draft = _draft_with_scenes("The offer")
+
+    orchestrator.attach_scene_images(draft, pexels_client=client)
+
+    assert client.calls[0][0] == "The offer"
+    assert draft["image_set"] == [
+        {
+            "segment_id": 1,
+            "image_url": "https://images.pexels.com/1/large.jpg",
+            "credit_source": "Someone",
+        }
+    ]
+
+
+def test_attach_scene_images_falls_back_to_category_in_the_keyword_list():
+    client = _FakePexelsClient({})
+    draft = _draft_with_scenes("An obscure scene name")
+
+    orchestrator.attach_scene_images(draft, pexels_client=client)
+
+    primary, fallbacks = client.calls[0]
+    assert primary == "An obscure scene name"
+    assert "curious" in fallbacks
+
+
+def test_attach_scene_images_skips_a_scene_with_no_match_at_all():
+    client = _FakePexelsClient({})
+    draft = _draft_with_scenes("Scene one", "Scene two")
+
+    orchestrator.attach_scene_images(draft, pexels_client=client)
+
+    assert draft["image_set"] == []
+
+
+def test_attach_scene_images_returns_the_same_draft_it_mutates():
+    client = _FakePexelsClient({"S": [_image()]})
+    draft = _draft_with_scenes("S")
+
+    result = orchestrator.attach_scene_images(draft, pexels_client=client)
+
+    assert result is draft

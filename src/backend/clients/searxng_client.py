@@ -236,8 +236,10 @@ def _generate_query_plans(
         f"Controlled angle_type vocabulary: {ANGLE_TYPES}"
     )
 
-    response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
+    from backend.clients.gemini_client import _generate_with_model_fallback
+
+    response = _generate_with_model_fallback(
+        gemini_client,
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -325,8 +327,10 @@ def discover_specific_axis(
         f"Subject: '{topic}'. Creator niche/domain: '{niche or 'unspecified'}'."
     )
 
-    response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
+    from backend.clients.gemini_client import _generate_with_model_fallback
+
+    response = _generate_with_model_fallback(
+        gemini_client,
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
