@@ -1,77 +1,139 @@
-# mcp-agent — Plan (written 2026-08-07)
+# mcp-agent — Plan (rewritten 2026-08-09, ~20:00)
 
-Written as part of a full plan-file pass across all 4 active agents before
-simultaneous deployment. Read `CLAUDE.md`'s Agent Loop Strategy first — and
-note this agent's scope explicitly depends on Phases 1-4 landing (each MCP
-tool wraps an already-built function), so most of this plan is sequencing
-and one shared blocker, not code to write yet.
+**You are the `mcp-agent`, working in `scenepaper-mcp` on branch
+`feature/mcp-server`. Read `agents/mcp-agent.md` for your role and `CLAUDE.md`
+for the project rules before touching code.**
 
-## Real current state
+**You are unblocked as of tonight.** Issue #3 is resolved — the API Gateway
+question that gated your entire scope has been answered, and there are three
+live routes to wrap.
 
-- **Genuinely zero MCP server code anywhere in the repo** (confirmed via a
-  repo-wide grep across all 6 worktrees for `fastmcp`, `mcp.server`,
-  `@mcp.tool`, `ModelContextProtocol` — zero hits). `agents/mcp-agent.md`'s
-  framing is accurate, not stale.
-- Worktree was 2 commits behind `main` — fast-forward synced this session
-  (`37b20d0` → `8cf8676`), clean, no local changes lost.
-- Issue #12 (Phase 5 tracking) is OPEN, all 9 checklist items unchecked.
+## First action: commit this plan file
 
-## Shared blocker with catalyst-agent — issue #3 (API Gateway route)
+Before any other work, commit **this file only** to `feature/mcp-server`:
 
-This is the same underlying gap documented in catalyst-agent's
-`ai-docs/plan.md` work item 2: the Catalyst MCP's
-`Configure_API_Gateway_Route` tool rejects its own documented `target` enum
-values, and the CLI has no route-creation command at all (only
-`apig:enable/disable/status`, confirmed by reading `catalyst --help`
-directly this session). **A real route has to be created by hand in the
-Catalyst console** — target `scenepaper_pipeline` (Advanced I/O Function).
-This is a **hil** item, not something either agent's session can resolve
-unattended. mcp-agent cannot answer its own architecture question (below)
-until this exists and has been exercised with one real HTTP call.
+```
+git add ai-docs/plan.md
+git commit -m "Add mcp-agent plan for the pipeline integration push"
+git push
+```
 
-## The architecture decision mcp-agent needs, once the route exists
+It is the record of what you were asked to do, so it should exist in git
+before the work starts. This one commit does not need a checkpoint — it is
+a doc file the user has already approved. **Everything after it does.**
 
-`agents/mcp-agent.md` frames this as "don't assume the architecture until
-#3 is answered" — the actual open question is:
+## Follow the loop in CLAUDE.md
 
-- **Option A**: MCP server runs as its own process (could be local for the
-  demo, e.g. a Python `fastmcp`/`mcp` SDK server), and each tool call is an
-  HTTP request to the now-reachable `scenepaper_pipeline` Advanced I/O
-  Function via its Gateway route.
-- **Option B**: MCP server logic runs inside Catalyst itself (e.g. another
-  Advanced I/O Function speaking the MCP protocol directly), no separate
-  process to deploy/manage.
+ORIENT → PLAN → ACT → VERIFY → **CHECKPOINT** → COMMIT. Present the diff and
+wait for explicit approval before committing.
 
-This is a **hil** decision for the user, not something to pick unattended —
-flag it rather than guessing. (Leaning note, not a decision: Option A is
-simpler to stand up for a hackathon demo and matches how most MCP servers
-are actually deployed — a thin process wrapping HTTP calls — but this is
-the user's call once the route is live and testable.)
+Stay inside this worktree. Do not edit `scenepaper-api`,
+`scenepaper-catalyst`, or `scenepaper-ui`.
 
-## Work item — MCP server scaffold + 7 tools (BLOCKED until architecture
-decision + Phases 1-4 land on `main`)
+## Why this matters more than it looks
 
-Per `CLAUDE.md`'s MCP tools list, once unblocked:
-- `search_story_ideas(topic)` → wraps `POST /ideate`
-- `get_scene_paper(topic)` → wraps `GET /paper/:id`
-- `verify_source(paper_id)` → surfaces `sources[]`/verification_status
-- `generate_scene_paper(source_url)` → wraps `POST /generate`
-- `generate_voiceover(paper_id)` → wraps the TTS regeneration path
-- `list_available_stories(category)` → wraps the `category_index` query
-- `get_usage_status(user_id)` → wraps the free-tier/export-lock counters
+`CLAUDE.md` is explicit: *"MCP connection must be used during actual
+development AND the product itself ships its own MCP server — this is the
+hackathon differentiator, do not treat it as optional."* It is checklist-graded
+and currently has **zero code**. Of everything outstanding, this is the item
+most likely to cost marks by simply not existing.
 
-Each is a thin wrapper — the real logic already lives in
-catalyst-agent's/api-integration-agent's functions. Tag: **afk** once the
-architecture decision is made and at least catalyst-agent's routes are
-live, since the wrapping itself has no open judgment calls.
+---
 
-## Order for a fresh session executing this file
+## The architecture question is now answerable
 
-1. Do NOT start the 7-tool scaffold yet — everything below is blocked.
-2. Check whether issue #3's route has been created (ask the user / check
-   `catalyst apig:status` and try hitting the function's URL directly).
-3. If the route exists: surface the architecture decision (Option A vs B)
-   to the user before writing any server code.
-4. Only after both of the above: scaffold the MCP server + first tool
-   (`search_story_ideas`, since catalyst-agent's `/ideate` route already
-   has a real (stubbed-search) implementation to wrap), then the rest.
+The old blocker was "can a Catalyst function host MCP tool calls at all?"
+What we now know:
+
+- The API Gateway is **REST-only** — no streaming/SSE anywhere in its schema.
+- Advanced I/O functions cap at **30 seconds**; the real pipeline runs as a Job
+  (15-min budget) and returns a `job_id` immediately.
+- Three live REST routes exist and are verified working.
+
+**Recommended: run the MCP server as its own process** (Python, `mcp` SDK) that
+makes HTTP calls to the Gateway routes. Rationale: it's how most MCP servers
+are actually deployed, it sidesteps the 30s cap entirely, and each tool call
+stays short because the slow work is already asynchronous behind `/generate`.
+Hosting MCP *inside* Catalyst would fight both the REST-only gateway and the
+timeout for no real benefit.
+
+**Confirm this with the user before building** — it's an architecture decision,
+and `agents/mcp-agent.md` tells you not to assume it.
+
+Useful precedent: the Voicebox desktop app ships `voicebox-mcp` and mounts MCP
+at `/mcp` on its own server. Worth a look at how it's structured, and worth
+mentioning in the demo as a second real MCP integration.
+
+---
+
+## The live backend you're wrapping
+
+Base URL: `https://scenepaper-60081628315.development.catalystserverless.in`
+
+| Route | Behaviour |
+|---|---|
+| `POST /ideate` | `{"topic": "..."}` → candidate one-liners |
+| `POST /generate` | `{"topic":..., "candidate":{...}}` → **202** + `job_id` + `paper_id` |
+| `GET/PUT/DELETE /paper?id=<id>` | ScenePaper CRUD |
+
+Three things that will trip you up:
+
+1. **`?id=` is not `/paper/<id>`.** The Gateway rewrites each rule to a fixed
+   path and cannot carry a per-request id.
+2. **`/generate` is async.** It returns before the paper exists. A tool that
+   claims to have generated a paper must either poll `GET /paper?id=` or
+   honestly report "started, not finished" — do not pretend it's done.
+3. **Generation takes 15–30+ seconds.** Keep each individual tool call short;
+   never block an MCP call on the whole pipeline.
+
+---
+
+## Work item 1 — Scaffold the server (do this first)
+
+**Tag: afk** once the architecture is confirmed.
+
+Create a minimal MCP server that starts, registers one tool
+(`list_available_stories` or `get_usage_status` — both are simple reads), and
+responds to a real client. Prove the round trip before writing seven tools
+against an unproven scaffold.
+
+Keep the HTTP base URL configurable via env var, not hardcoded.
+
+## Work item 2 — The seven tools
+
+Per `CLAUDE.md`, each a thin wrapper over an existing route:
+
+| Tool | Backing |
+|---|---|
+| `search_story_ideas(topic)` | `POST /ideate` |
+| `generate_scene_paper(source_url)` | `POST /generate` (async — see above) |
+| `get_scene_paper(topic)` | `GET /paper?id=` |
+| `verify_source(paper_id)` | `GET /paper?id=`, surface `sources[]` + status |
+| `generate_voiceover(paper_id)` | needs api-integration's TTS work first |
+| `list_available_stories(category)` | needs a category-filtered list route |
+| `get_usage_status(user_id)` | needs the UserProfile counter |
+
+The last three depend on work not yet built. **Build the first four now**, and
+have the others fail honestly with "not implemented yet" rather than returning
+fabricated data. A tool that lies is worse than a tool that's missing —
+especially in a product whose entire pitch is verification.
+
+## Work item 3 — End-to-end validation
+
+**Tag: hil.** Every tool called from a real MCP client, results checked by a
+human. This is a demo moment: showing the pipeline driven entirely through
+MCP tool calls, with no UI, is a strong differentiator.
+
+---
+
+## Verification before any checkpoint
+
+Each tool exercised against the live routes, plus offline tests with a fake
+HTTP layer so the suite doesn't depend on Catalyst being up.
+
+## Order
+
+1. Confirm the architecture (Option A vs B) with the user.
+2. Work item 1 — scaffold and prove one tool.
+3. Work item 2 — the four buildable tools.
+4. Revisit the remaining three as their dependencies land.
