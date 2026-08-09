@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "scenepaper": {
+      "command": "/Users/sankara-17600/open-webui-env/bin/python3",
+      "args": ["-m", "mcp_server.server"],
+      "cwd": "/Users/sankara-17600/Desktop/Personal/Projects/scenepaper-mcp/src",
+      "env": {
+        "SCENEPAPER_API_URL": "https://scenepaper-60081628315.development.catalystserverless.in"
+      }
+    }
+  }
+}
