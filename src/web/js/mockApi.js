@@ -25,9 +25,12 @@ const USE_MOCK_DATA = params.has("mock") || false; // <-- demo-insurance overrid
 
 // ?searchfailed=1 / ?generatefailed=1 force those calls to reject even in
 // mock mode, so the Screen 2 / progress failed-states can be reviewed
-// without code changes.
+// without code changes. ?searchtimeout=1 simulates the specific real 408
+// EXECUTION_TIME_EXCEEDED condition (see backendError below) without
+// needing to wait out the real backend's 30s cap on a slow topic.
 const SIMULATE_SEARCH_FAILURE = params.has("searchfailed");
 const SIMULATE_GENERATE_FAILURE = params.has("generatefailed");
+const SIMULATE_SEARCH_TIMEOUT = params.has("searchtimeout");
 
 function withLatency(value, ms = 400) {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms));
@@ -41,12 +44,28 @@ async function safeJson(res) {
   }
 }
 
-// The backend's error envelope is consistently {status:"error", message}
-// across 400/404/502/503 (see ai-docs/plan.md) — surface the real message
-// instead of a generic "request failed".
-function backendErrorMessage(body, status) {
-  if (body && typeof body.message === "string" && body.message) return body.message;
-  return `Request failed (HTTP ${status})`;
+// The backend's error envelope is NOT one consistent shape — confirmed two,
+// empirically:
+//   application-level errors:  {status:"error",   message: "..."}
+//   Catalyst runtime errors:   {status:"failure", data: {message, error_code}}
+// (a 408 EXECUTION_TIME_EXCEEDED — the search backend's own 30s cap — comes
+// back in the second shape). Check both rather than assuming one. Attaches
+// `status` (HTTP) and `errorCode` (semantic, when present) to the thrown
+// Error so callers can branch on the real condition (e.g. a timeout) instead
+// of pattern-matching English text out of the message.
+function backendError(body, httpStatus) {
+  const message =
+    (body && typeof body.message === "string" && body.message) ||
+    (body && body.data && typeof body.data.message === "string" && body.data.message) ||
+    `Request failed (HTTP ${httpStatus})`;
+  const errorCode =
+    (body && typeof body.error_code === "string" && body.error_code) ||
+    (body && body.data && typeof body.data.error_code === "string" && body.data.error_code) ||
+    null;
+  const err = new Error(message);
+  err.status = httpStatus;
+  err.errorCode = errorCode;
+  return err;
 }
 
 // The real /ideate response is missing several fields the UI expects
@@ -270,6 +289,13 @@ async function searchCandidates({ topic, hint = null, excludeAngleTypes = [] }) 
       await withLatency(null, 500);
       throw new Error("search backend unreachable");
     }
+    if (SIMULATE_SEARCH_TIMEOUT) {
+      await withLatency(null, 500);
+      throw backendError(
+        { status: "failure", data: { message: "applogic Execution Time Exceeded", error_code: "EXECUTION_TIME_EXCEEDED" } },
+        408
+      );
+    }
 
     if (hint) {
       return withLatency({
@@ -317,8 +343,8 @@ async function searchCandidates({ topic, hint = null, excludeAngleTypes = [] }) 
     body: JSON.stringify({ topic: t, hint, exclude_angle_types: excludeAngleTypes }),
   });
   const body = await safeJson(res);
-  if (!res.ok || (body && body.status === "error")) {
-    throw new Error(backendErrorMessage(body, res.status));
+  if (!res.ok || (body && (body.status === "error" || body.status === "failure"))) {
+    throw backendError(body, res.status);
   }
   return {
     topic: (body && body.topic) || t,
@@ -590,7 +616,7 @@ async function startGeneration({ candidate, topic }) {
   });
   const body = await safeJson(res);
   if (res.status !== 202) {
-    throw new Error(backendErrorMessage(body, res.status));
+    throw backendError(body, res.status);
   }
   return { paper_id: body && body.paper_id };
 }
@@ -616,9 +642,19 @@ async function getPaper(paperId) {
   if (res.status === 404) return null;
   const body = await safeJson(res);
   if (!res.ok) {
-    throw new Error(backendErrorMessage(body, res.status));
+    throw backendError(body, res.status);
   }
-  return body;
+  // GET /paper?id= wraps the document: {status: "success", paper: {...}}.
+  // Returning `body` handed the ENVELOPE to the renderer, so paper.hooks,
+  // paper.scenes and paper.sources were all undefined -- which read as a
+  // paper with no hooks, no scenes and "0/10 · Needs checking", even though
+  // the backend had produced a complete, correctly-scored document.
+  // searchStoryIdeas already unwraps (body.candidates); this was missed.
+  // The mock path returns a bare paper object, which is why mock mode looked
+  // fine and only the live backend showed the fault.
+  // Tolerate both shapes so a future unwrapping change upstream can't break
+  // this again.
+  return body && body.paper ? body.paper : body;
 }
 
 // Exposed as a plain global object — no bundler/module step, per CLAUDE.md's
