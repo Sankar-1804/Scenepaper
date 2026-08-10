@@ -1069,6 +1069,11 @@
   }
 
   function renderScriptLines(scene) {
+    // Declared here, not borrowed from renderScriptMeta -- an earlier
+    // defensive-guard edit referenced `script` in this function while only
+    // declaring it in that one, so this threw ReferenceError and killed the
+    // whole scene-detail render before the view could switch.
+    const script = scene.script || [];
     els.scriptLines.innerHTML = script
       .map((entry) => {
         const isQuote = isSecondarySpeaker(entry.speaker);
