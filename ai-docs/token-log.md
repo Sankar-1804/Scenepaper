@@ -53,3 +53,65 @@ Required hackathon deliverable — logged honestly after each session, per `CLAU
 - Ran the actual web UI scaffold locally (`python3 -m http.server 8000` in `scenepaper-ui/src/web`) and drove it headlessly with a scratch Playwright install to confirm it genuinely works — full flow (topic → candidates → pick → paper detail) renders correctly, zero console errors, suppressed source shown with its reason per the trust-model requirement.
 - User is not fully satisfied with the UI's current look (expected — visual polish was deliberately deferred to a later HIL pass per every relevant doc) but is fine with everything built as a starting point. Stopping here for the night; user will review and push to `main` themselves in the morning.
 - **Still nothing merged to `main`.** One open PR (#22, unmerged). Two worktrees with real local uncommitted code. Local dev server left running on port 8000 (harmless, localhost-only).
+
+## Sessions 4–5 — 2026-08-09 into 2026-08-10 — integration: four components → one working pipeline
+
+**Primary tool:** Claude Code CLI, model Claude Sonnet 5. Parallel agent
+sessions per worktree (`api-integration`, `catalyst`, `ui`, `mcp`), driven by
+the user, plus one orchestrating session.
+
+### What actually happened
+
+Sessions 1–3 produced four well-built components that had **never been
+connected**. This stretch connected them. At the start, `verify_and_score_candidate`
+and `structure_scene_paper` had zero callers outside tests; `profile_parser`'s
+injection defense was never invoked; the Job function's five pipeline stages
+were stubs; the web client read mock data; the MCP server did not exist.
+
+By the end: `topic → SearXNG → verified candidates → Call A → Call B → NoSQL →
+retrievable over HTTP`, live.
+
+### Deliverables
+
+- **7 PRs merged** (#28–#34), 43 commits on `main` in ~24h.
+- **98 tests passing, 1 skipped** on `main`.
+- Issues **#1, #2, #3, #21** resolved.
+
+### AI/model usage
+
+- **Google Gemini** (`gemini-3.6-flash` primary, `gemini-3.5-flash` fallback)
+  for Call A (verification/scoring) and Call B (structuring), plus ideation's
+  query-generation and one-liner calls. Roughly 60–80 live calls across the
+  stretch — the majority spent on **diagnosis, not generation**: several
+  end-to-end runs were consumed chasing a client-side rendering bug that a
+  single logged response would have caught. Recorded here because it is the
+  single most repeatable lesson from the session.
+- **Free-tier quota is the real constraint:** RPD 20 **per model, per key**.
+  Both keys' primary models were exhausted at least once. Failed calls
+  consume quota too — two 404s against a retired model showed up as 2/20 on
+  the dashboard.
+- **Sub-agents:** two read-only verification agents (Explore) auditing agent
+  output across worktrees — 727,129 and 728,703 tokens, 436 and 437 tool
+  calls respectively. Used to check claims independently rather than trusting
+  commit messages; both surfaced real defects (a non-importing MCP server, a
+  UI regression that would have deleted working screens).
+
+### MCP usage (hackathon checklist — both halves)
+
+- **Used during development:** the Zoho **Catalyst MCP** heavily (job status,
+  logs, function/jobpool listing, CORS domains, API route create/delete, cache
+  items, segments) and **`zoho-learn-platformai`** in session 2 to read the
+  PlatformAI v2 manual directly, which is what ruled it out. `zoho-projects`
+  was connected but not invoked.
+- **Shipped in the product:** `src/mcp_server/` — 7 tools, 4 live against the
+  backend, 3 returning `not_implemented` honestly rather than fabricating data.
+
+### Honesty notes
+
+- `ONE_LINER_PROMPT` was drafted by the assistant in a file whose comment
+  reserved it for a human. Flagged `DRAFT, pending review` in-code; it shapes
+  the first thing a user reads and has not yet been reviewed.
+- Three of seven MCP tools are non-functional, and two of those
+  (`list_available_stories`, `get_usage_status`) are blocked on small missing
+  backend routes, not on voice/video.
+- Voiceover and image stages remain stubs. The UI no longer claims otherwise.
