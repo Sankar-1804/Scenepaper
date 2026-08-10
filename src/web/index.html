@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="dark" />
   <title>ScenePaper</title>
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/styles.css?v=20260810a" />
 </head>
 <body>
   <!--
@@ -63,8 +63,18 @@
 
     <p class="result-context" id="result-context" aria-live="polite"></p>
 
+    <div class="search-progress" id="search-progress" aria-live="polite" hidden>
+      <p class="search-progress-intro" id="search-progress-intro"></p>
+      <div class="progress-steps-header">
+        <span class="section-label">searching</span>
+        <span class="search-elapsed mono" id="search-elapsed">0s</span>
+      </div>
+      <div class="progress-steps" id="search-progress-steps"></div>
+      <p class="progress-reassurance" id="search-reassurance" hidden></p>
+    </div>
+
     <div class="candidate-list" id="candidate-list" aria-live="polite">
-      <!-- rendered by app.js: renderCandidates() -->
+      <!-- rendered by app.js: renderCandidates() / renderCandidateSkeletons() -->
     </div>
 
     <div class="candidate-actions" id="candidate-actions">
@@ -183,8 +193,8 @@
     <p class="mock-data-note" id="data-source-note"></p>
   </footer>
 
-  <script src="js/splash.js"></script>
-  <script src="js/mockApi.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/splash.js?v=20260810a"></script>
+  <script src="js/mockApi.js?v=20260810a"></script>
+  <script src="js/app.js?v=20260810a"></script>
 </body>
 </html>

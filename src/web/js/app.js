@@ -981,6 +981,15 @@
   }
 
   function showScenePaper(paper) {
+    // Belt and braces: unwrap the {status, paper} envelope here too.
+    // GET /paper?id= responds {status:"success", paper:{...}}; mockApi's
+    // getPaper unwraps it, but doing it again at the render boundary means a
+    // paper arriving from ANY path renders correctly. Handing the envelope to
+    // the renderer is what made complete, correctly-scored papers display as
+    // "0/10 · Needs checking" with no hooks and no scenes -- every field was
+    // simply one level too deep. Cheap to be defensive about; expensive to
+    // debug when it happens.
+    if (paper && paper.paper && !paper.title) paper = paper.paper;
     currentPaper = paper;
     // Hook selection persists for as long as this paper is on screen — it's
     // part of what the user takes to recording. Defaults to the first hook
