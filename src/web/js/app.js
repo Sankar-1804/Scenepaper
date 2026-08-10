@@ -50,6 +50,11 @@
     changeTopicButton: document.getElementById("change-topic-button"),
     candidatesUsage: document.getElementById("candidates-usage"),
     resultContext: document.getElementById("result-context"),
+    searchProgress: document.getElementById("search-progress"),
+    searchProgressIntro: document.getElementById("search-progress-intro"),
+    searchElapsed: document.getElementById("search-elapsed"),
+    searchProgressSteps: document.getElementById("search-progress-steps"),
+    searchReassurance: document.getElementById("search-reassurance"),
     candidateList: document.getElementById("candidate-list"),
     candidateActions: document.getElementById("candidate-actions"),
     showMoreButton: document.getElementById("show-more-button"),
@@ -124,6 +129,41 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  // Shared by the search-progress list (Screen 2) and the generation-
+  // progress list — same visual language for both real waits, per the
+  // design note that they should feel like one product. `activeIndex` is
+  // never claimed complete by the caller past what's actually known —
+  // both callers stop advancing it once they run out of real information
+  // and just hold the last step "active" for as long as it actually takes.
+  function renderStepList(targetEl, steps, activeIndex) {
+    targetEl.innerHTML = steps
+      .map((step, i) => {
+        let iconHtml = ICON_CIRCLE_DASHED;
+        let iconClass = "";
+        let labelClass = "";
+        if (i < activeIndex) {
+          iconHtml = ICON_CHECK_CIRCLE_FILL;
+          iconClass = "is-complete";
+          labelClass = "is-complete";
+        } else if (i === activeIndex) {
+          iconHtml = ICON_CIRCLE_NOTCH;
+          iconClass = "is-active";
+          labelClass = "is-current";
+        }
+        return `
+          <div class="progress-step">
+            <div class="progress-step-icon ${iconClass}">${iconHtml}</div>
+            <div class="progress-step-label ${labelClass}">${escapeHtml(step.label)}</div>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  function prefersReducedMotion() {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
 
   // ---- auto-growing textarea ----
@@ -327,12 +367,118 @@
     els.suppressedSection.hidden = true;
   }
 
+  // ---- search-progress: the "searching" state for /ideate ----
+  //
+  // /ideate is a single blocking call, typically 20-30s+, with no progress
+  // events to subscribe to. So this does NOT fake a percentage or a live
+  // source counter — both would be inventing data in a product whose whole
+  // pitch is verification. What's real and shown instead: elapsed time
+  // (always accurate) and the pipeline's known, fixed stage sequence
+  // (classify -> build queries -> search SearXNG -> score domain quality ->
+  // cluster -> summarize), paced against a measured TYPICAL duration —
+  // there's no per-stage telemetry, so that pacing is an estimate. The last
+  // stage never auto-completes on the timer; it just holds "active" for as
+  // long as the real call actually takes, same pattern as the generation-
+  // progress screen (and reusing its exact visual language, on purpose).
+
+  const SEARCH_STAGES = [
+    { label: "Understanding the request" },
+    { label: "Building search queries" },
+    { label: "Searching sources" },
+    { label: "Ranking by source quality" },
+    { label: "Grouping into distinct stories" },
+    { label: "Writing candidate summaries" },
+  ];
+
+  // Rough midpoint of the measured range (broad topics ~25s, specific
+  // subjects ~28s+) — paces the stage list only, never used to predict or
+  // claim completion.
+  const SEARCH_EXPECTED_DURATION_MS = 27000;
+  const SEARCH_SLOW_AFTER_MS = 30000;
+  const SEARCH_ELAPSED_TICK_MS = 500;
+  // Fraction of SEARCH_EXPECTED_DURATION_MS elapsed at which each stage
+  // after the first becomes active — one fewer entry than SEARCH_STAGES,
+  // since the last stage has no threshold; it's just "whatever's left".
+  const SEARCH_STAGE_THRESHOLDS = [0.05, 0.2, 0.6, 0.7, 0.85];
+
+  function stageIndexForElapsed(elapsedMs) {
+    const ratio = elapsedMs / SEARCH_EXPECTED_DURATION_MS;
+    let idx = 0;
+    for (const threshold of SEARCH_STAGE_THRESHOLDS) {
+      if (ratio >= threshold) idx++;
+    }
+    return Math.min(idx, SEARCH_STAGES.length - 1);
+  }
+
+  function formatElapsedSeconds(ms) {
+    return `${Math.floor(ms / 1000)}s`;
+  }
+
+  // So the result lands into an already-shaped layout instead of replacing
+  // a plain message — CLAUDE.md's ScenePaper trust model always shows the
+  // top 3 regardless of score, so 3 is the honest number to skeleton, not
+  // a guess at "3-4".
+  function renderCandidateSkeletons(count) {
+    return Array.from(
+      { length: count },
+      () => `
+        <div class="candidate-card candidate-card-skeleton" aria-hidden="true">
+          <div class="skeleton-bar skeleton-bar-title"></div>
+          <div class="skeleton-bar skeleton-bar-title skeleton-bar-title-short"></div>
+          <div class="skeleton-bar skeleton-bar-pill"></div>
+          <hr class="candidate-divider" />
+          <div class="skeleton-bar skeleton-bar-meta"></div>
+        </div>
+      `
+    ).join("");
+  }
+
+  // Starts the searching UI and returns a stop() to call once the real
+  // response lands — success, exhaustion, or failure all call it.
+  function startSearchProgress() {
+    els.searchProgress.hidden = false;
+    els.searchProgressIntro.textContent =
+      "This usually takes 20–30 seconds — we're searching real sources, not generating from memory.";
+    els.searchReassurance.hidden = true;
+    els.candidateList.innerHTML = renderCandidateSkeletons(3);
+
+    const startedAt = Date.now();
+    let reassured = false;
+
+    function tick() {
+      const elapsedMs = Date.now() - startedAt;
+      els.searchElapsed.textContent = formatElapsedSeconds(elapsedMs);
+      renderStepList(els.searchProgressSteps, SEARCH_STAGES, stageIndexForElapsed(elapsedMs));
+
+      if (!reassured && elapsedMs >= SEARCH_SLOW_AFTER_MS) {
+        reassured = true;
+        els.searchReassurance.hidden = false;
+        els.searchReassurance.textContent =
+          "This is taking longer than usual — some topics take longer to verify than others. Still working.";
+      }
+    }
+
+    tick();
+    const intervalId = setInterval(tick, SEARCH_ELAPSED_TICK_MS);
+
+    return function stopSearchProgress() {
+      clearInterval(intervalId);
+      els.searchProgress.hidden = true;
+    };
+  }
+
+  // A 408 EXECUTION_TIME_EXCEEDED is a known, understood condition (the
+  // search backend's own 30s cap), not a generic failure — say so, and
+  // give the actual workaround instead of a raw HTTP-status string.
   function renderSearchFailed(err) {
     els.resultContext.textContent = "";
-    const detail = err && err.message ? ` (${escapeHtml(err.message)})` : "";
+    const isTimeout = err && (err.errorCode === "EXECUTION_TIME_EXCEEDED" || err.status === 408);
+    const messageHtml = isTimeout
+      ? `This search passed the server's 30-second limit and timed out. Specific, single-subject topics (like "Google") often take longer to verify than broad ones ("an underdog comeback") — try broadening the topic, or try again.`
+      : `Something went wrong searching for candidates${err && err.message ? ` (${escapeHtml(err.message)})` : ""}.`;
     els.candidateList.innerHTML = `
       <div class="state-message">
-        <p>Something went wrong searching for candidates${detail}.</p>
+        <p>${messageHtml}</p>
         <button type="button" class="secondary-button" id="retry-search-button">Try again</button>
       </div>
     `;
@@ -400,18 +546,19 @@
     setCandidatesBusy(true);
     els.candidateActions.hidden = true;
     els.suppressedSection.hidden = true;
-    els.candidateList.innerHTML = `
-      <div class="state-message"><p>Searching for verified candidate stories…</p></div>
-    `;
+    els.resultContext.textContent = "";
+    const stopSearchProgress = startSearchProgress();
 
     let result;
     try {
       result = await api.searchCandidates(params);
     } catch (err) {
+      stopSearchProgress();
       renderSearchFailed(err);
       setCandidatesBusy(false);
       return;
     }
+    stopSearchProgress();
 
     if (result.exhausted) {
       renderExhausted(result.message);
@@ -471,39 +618,41 @@
   const GENERATION_POLL_TIMEOUT_MS = 90000;
   const GENERATION_REASSURANCE_AFTER_MS = 15000;
 
+  // These are the stages POST /generate's job function ACTUALLY runs, in
+  // order. Two entries were removed on 2026-08-10 -- "Generating voiceover"
+  // and "Matching images" -- because the job logs those as
+  // "STUB stage 2/4" and "STUB stage 3/4": neither does any work. Ticking
+  // them was claiming work that never happened, which is not a thing this
+  // product can afford to do. Put them back when the stages are real.
+  //
+  // "Searching sources" was also dropped: the search happens during
+  // /ideate, before this screen. By the time we get here the candidate
+  // already carries its sources.
   const PROGRESS_STEPS = [
-    { label: "Searching sources" },
-    { label: "Verifying claims" },
+    { label: "Verifying sources" },
     { label: "Structuring the scene paper" },
-    { label: "Generating voiceover" },
-    { label: "Matching images" },
+    { label: "Saving your scene paper" },
   ];
 
-  function prefersReducedMotion() {
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Measured: Call A ~10s, Call B ~15s, NoSQL write ~1s.
+  const GENERATION_EXPECTED_DURATION_MS = 26000;
+  const GENERATION_ELAPSED_TICK_MS = 500;
+  // Fraction of GENERATION_EXPECTED_DURATION_MS at which each stage after
+  // the first becomes active. One fewer entry than PROGRESS_STEPS -- the
+  // last stage has no threshold, it holds until the real call returns.
+  const GENERATION_STAGE_THRESHOLDS = [0.38, 0.92];
+
+  function generationStageForElapsed(elapsedMs) {
+    const ratio = elapsedMs / GENERATION_EXPECTED_DURATION_MS;
+    let idx = 0;
+    for (const threshold of GENERATION_STAGE_THRESHOLDS) {
+      if (ratio >= threshold) idx++;
+    }
+    return Math.min(idx, PROGRESS_STEPS.length - 1);
   }
 
   function renderProgressSteps(activeIndex) {
-    els.progressSteps.innerHTML = PROGRESS_STEPS.map((step, i) => {
-      let iconHtml = ICON_CIRCLE_DASHED;
-      let iconClass = "";
-      let labelClass = "";
-      if (i < activeIndex) {
-        iconHtml = ICON_CHECK_CIRCLE_FILL;
-        iconClass = "is-complete";
-        labelClass = "is-complete";
-      } else if (i === activeIndex) {
-        iconHtml = ICON_CIRCLE_NOTCH;
-        iconClass = "is-active";
-        labelClass = "is-current";
-      }
-      return `
-        <div class="progress-step">
-          <div class="progress-step-icon ${iconClass}">${iconHtml}</div>
-          <div class="progress-step-label ${labelClass}">${escapeHtml(step.label)}</div>
-        </div>
-      `;
-    }).join("");
+    renderStepList(els.progressSteps, PROGRESS_STEPS, activeIndex);
   }
 
   function renderProgressFailed(err, candidate) {
@@ -554,21 +703,23 @@
     els.progressOneLiner.textContent = candidate.one_liner;
     showView("progress");
 
-    const stepDelay = prefersReducedMotion() ? 80 : 600;
-    const introSteps = PROGRESS_STEPS.length - 1;
+    // Advance stages against ELAPSED TIME, not a fixed animation. The old
+    // version raced through every stage in ~2.4s and then parked on the last
+    // one for the remaining ~25s, which read as a hang. Same approach the
+    // candidate-search screen uses.
+    const startedAt = Date.now();
     renderProgressSteps(0);
-    for (let i = 0; i < introSteps; i++) {
-      await new Promise((resolve) => setTimeout(resolve, stepDelay));
-      renderProgressSteps(i + 1);
-    }
-    // Last step ("Matching images") is now "active" and stays that way —
-    // rendered once above, not touched again until we leave this screen.
+    const ticker = setInterval(() => {
+      renderProgressSteps(generationStageForElapsed(Date.now() - startedAt));
+    }, GENERATION_ELAPSED_TICK_MS);
 
     try {
       const { paper_id } = await api.startGeneration({ candidate, topic: currentTopic });
       const paper = await pollForPaper(paper_id);
+      clearInterval(ticker);
       showScenePaper(paper);
     } catch (err) {
+      clearInterval(ticker);
       renderProgressFailed(err, candidate);
     }
   }
