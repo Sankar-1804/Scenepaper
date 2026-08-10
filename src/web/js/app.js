@@ -1272,4 +1272,36 @@
   els.sceneNextButton.addEventListener("click", () => {
     if (currentSceneIndex < currentPaper.scenes.length - 1) renderSceneDetail(currentSceneIndex + 1);
   });
+
+  // ==========================================================================
+  // DEMO DEEP LINK — ?paper=<paper_id>
+  // ==========================================================================
+  //
+  // Opens a ScenePaper already stored in NoSQL, straight to the paper view,
+  // skipping ideation and generation entirely. Costs ZERO Gemini calls, so it
+  // works when the daily free-tier quota is exhausted (RPD 20 per model per
+  // key) and cannot 408 the way /ideate can against the 30s cap.
+  //
+  // Purely additive: nothing above this block is modified, and without the
+  // query param the app behaves exactly as before. TO REVERT: delete this
+  // block. That is the whole change.
+  //
+  // Exercises the real read path -- GET /paper?id= -> envelope unwrap ->
+  // full render including scene detail -- so it is a genuine demo of the
+  // stored artefact, not a mock.
+  (async function openPaperFromUrl() {
+    const paperId = new URLSearchParams(window.location.search).get("paper");
+    if (!paperId) return;
+
+    try {
+      const paper = await api.getPaper(paperId);
+      if (!paper) {
+        console.error(`?paper=${paperId} — no such paper (404). Check the id.`);
+        return;
+      }
+      showScenePaper(paper);
+    } catch (err) {
+      console.error(`?paper=${paperId} — failed to load:`, err && err.message);
+    }
+  })();
 })();
